@@ -1,82 +1,35 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
+    android:layout_height="wrap_content"
     android:orientation="vertical"
-    android:padding="16dp"
+    android:padding="12dp"
     android:background="#1E1E2E">
 
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="Looka Engine Control Panel"
+        android:text="Looka Engine"
         android:textColor="#00FFFF"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:layout_gravity="center"
-        android:layout_marginBottom="20dp"/>
+        android:textSize="14sp"
+        android:layout_gravity="center"/>
 
     <Button
-        android:id="@+id/enemySituationBtn"
+        android:id="@+id/btn1"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Enemy Situation: ON"
+        android:layout_height="40dp"
+        android:text="ESP: ON"
         android:textColor="#FFFFFF"
         android:background="#333333"
-        android:layout_marginBottom="10dp"/>
+        android:layout_marginTop="5dp"/>
 
     <Button
-        android:id="@+id/espBoxBtn"
+        android:id="@+id/btn2"
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="ESP Box: ON"
+        android:layout_height="40dp"
+        android:text="Aim: ON"
         android:textColor="#FFFFFF"
         android:background="#333333"
-        android:layout_marginBottom="10dp"/>
-
-    <Button
-        android:id="@+id/healthBarBtn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Health Bar: ON"
-        android:textColor="#FFFFFF"
-        android:background="#333333"
-        android:layout_marginBottom="10dp"/>
-
-    <Button
-        android:id="@+id/aimAssistBtn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Aim Assist: ON"
-        android:textColor="#FFFFFF"
-        android:background="#333333"
-        android:layout_marginBottom="10dp"/>
-
-    <Button
-        android:id="@+id/hardAimbotBtn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Hard Aimbot: OFF"
-        android:textColor="#FFFFFF"
-        android:background="#333333"
-        android:layout_marginBottom="10dp"/>
-
-    <Button
-        android:id="@+id/flickBoostBtn"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:text="Flick Boost: ON"
-        android:textColor="#FFFFFF"
-        android:background="#333333"
-        android:layout_marginBottom="10dp"/>
-
-    <TextView
-        android:id="@+id/statusText"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="Status: Ready"
-        android:textColor="#00FF00"
-        android:layout_gravity="center"
-        android:layout_marginTop="20dp"/>
+        android:layout_marginTop="5dp"/>
 
 </LinearLayout>
