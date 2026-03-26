@@ -72,19 +72,14 @@
         android:textColor="#FFFFFF"
         android:layout_marginTop="20dp"/>
 
-    <androidx.cardview.widget.CardView
+    <TextView
         android:id="@+id/statusCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="20dp"
-        app:cardCornerRadius="8dp"
-        app:cardBackgroundColor="#1E1E2E">
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="Status: Ready"
-            android:textColor="#FFFFFF"
-            android:padding="16dp"/>
-    </androidx.cardview.widget.CardView>
+        android:text="Status: Ready"
+        android:textColor="#FFFFFF"
+        android:background="#1E1E2E"
+        android:padding="16dp"
+        android:layout_marginTop="20dp"/>
 
 </LinearLayout>
