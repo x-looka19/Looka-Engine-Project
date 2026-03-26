@@ -46,6 +46,10 @@
 #include <fcntl.h>
 #include <linux/fb.h>
 #include <linux/input.h>
+#include <sys/sysinfo.h>
+#include <cstdarg>
+#include <openssl/conf.h>
+#include <openssl/opensslconf.h>
 
 // SIMD headers
 #ifdef __ARM_NEON
@@ -53,9 +57,15 @@
 #endif
 
 // OpenSSL
-#include <openssl/evp.h>
-#include <openssl/rand.h>
-#include <openssl/sha.h>
+extern "C" {
+    #include <openssl/evp.h>
+    #include <openssl/rand.h>
+    #include <openssl/sha.h>
+    #include <openssl/hmac.h>
+    #include <openssl/err.h>
+    #include <openssl/conf.h>
+    #include <openssl/opensslconf.h>
+}
 
 // ============================================================================
 // DEFINES & CONSTANTS
@@ -309,13 +319,24 @@ public:
             std::cerr << msg << std::endl;
         }
     }
+    void log(LogLevel level, const char* format, ...) {
+    if (level < min_level) return;
+    
+    char buffer[2048];
+    va_list args;
+    va_start(args, format);
+    vsnprintf(buffer, sizeof(buffer), format, args);
+    va_end(args);
+    
+    log(level, std::string(buffer));
+}
 };
 
-#define LOG_DEBUG(msg) Logger::getInstance().log(LogLevel::DEBUG, msg, __FILE__, __LINE__)
-#define LOG_INFO(msg) Logger::getInstance().log(LogLevel::INFO, msg, __FILE__, __LINE__)
-#define LOG_WARNING(msg) Logger::getInstance().log(LogLevel::WARNING, msg, __FILE__, __LINE__)
-#define LOG_ERROR(msg) Logger::getInstance().log(LogLevel::ERROR, msg, __FILE__, __LINE__)
-#define LOG_FATAL(msg) Logger::getInstance().log(LogLevel::FATAL, msg, __FILE__, __LINE__)
+#define LOG_DEBUG(fmt, ...) Logger::getInstance().log(LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#define LOG_INFO(fmt, ...) Logger::getInstance().log(LogLevel::INFO, fmt, ##__VA_ARGS__)
+#define LOG_WARNING(fmt, ...) Logger::getInstance().log(LogLevel::WARNING, fmt, ##__VA_ARGS__)
+#define LOG_ERROR(fmt, ...) Logger::getInstance().log(LogLevel::ERROR, fmt, ##__VA_ARGS__)
+#define LOG_FATAL(fmt, ...) Logger::getInstance().log(LogLevel::FATAL, fmt, ##__VA_ARGS__)
 
 // ============================================================================
 // 5. ROOT DETECTOR
