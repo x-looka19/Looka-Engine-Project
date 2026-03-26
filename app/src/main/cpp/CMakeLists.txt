@@ -5,8 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(OPENSSL_DIR ${CMAKE_SOURCE_DIR}/openssl/${ANDROID_ABI})
 
-# إضافة المسار الأب فقط لكي يجد المترجم مجلد openssl بداخله
 include_directories(${OPENSSL_DIR}/include)
+# هذا السطر ضروري لأن إصدارات OpenSSL الجديدة تضع الملفات في مجلدات فرعية مختلفة
+include_directories(${OPENSSL_DIR}/include/openssl)
 
 add_library(ssl STATIC IMPORTED)
 set_target_properties(ssl PROPERTIES IMPORTED_LOCATION ${OPENSSL_DIR}/lib/libssl.a)
