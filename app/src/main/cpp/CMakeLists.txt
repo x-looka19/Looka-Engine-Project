@@ -5,9 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(OPENSSL_DIR ${CMAKE_SOURCE_DIR}/openssl/${ANDROID_ABI})
 
+# الحل هنا: إضافة المجلد الأب للـ include ليتمكن المترجم من إيجاد openssl/opensslconf.h
 include_directories(${OPENSSL_DIR}/include)
-# هذا السطر ضروري لأن إصدارات OpenSSL الجديدة تضع الملفات في مجلدات فرعية مختلفة
 include_directories(${OPENSSL_DIR}/include/openssl)
+target_include_directories(looka_engine PRIVATE ${OPENSSL_DIR}/include)
 
 add_library(ssl STATIC IMPORTED)
 set_target_properties(ssl PROPERTIES IMPORTED_LOCATION ${OPENSSL_DIR}/lib/libssl.a)
