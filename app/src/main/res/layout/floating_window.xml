@@ -1,254 +1,275 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/panelCard"
     android:layout_width="280dp"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:background="#1E1E2E"
-    android:padding="8dp">
+    app:cardCornerRadius="12dp"
+    app:cardElevation="8dp"
+    app:cardBackgroundColor="#CC1E1E2E">
 
-    <!-- Header -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="40dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingHorizontal="8dp">
-
-        <TextView
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Looka Engine"
-            android:textColor="#00FFFF"
-            android:textSize="12sp"/>
-
-        <TextView
-            android:id="@+id/fpsValue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="0"
-            android:textColor="#00FF00"
-            android:textSize="12sp"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="FPS"
-            android:textColor="#888888"
-            android:textSize="10sp"
-            android:layout_marginEnd="8dp"/>
-
-        <Button
-            android:id="@+id/minimizeButton"
-            android:layout_width="24dp"
-            android:layout_height="24dp"
-            android:text="-"
-            android:textSize="16sp"
-            android:background="#333333"
-            android:textColor="#FFFFFF"/>
-    </LinearLayout>
-
-    <!-- Scrollable Content -->
-    <ScrollView
-        android:id="@+id/scrollContent"
-        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:maxHeight="400dp">
+        android:orientation="vertical">
 
+        <!-- Header -->
         <LinearLayout
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:padding="8dp">
+            android:layout_height="40dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingHorizontal="12dp"
+            android:background="#2A2A3A">
 
-            <!-- ESP Section -->
             <TextView
-                android:layout_width="wrap_content"
+                android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:text="🎯 ESP CONTROL"
-                android:textColor="#00FFFF"
+                android:layout_weight="1"
+                android:text="🎮 LOOKA ENGINE"
                 android:textSize="12sp"
+                android:textColor="#00FFFF"
                 android:textStyle="bold"/>
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#333333"
-                android:layout_marginVertical="8dp"/>
-
-            <Switch
-                android:id="@+id/enemySituationSwitch"
-                android:layout_width="match_parent"
+            <TextView
+                android:id="@+id/fpsValue"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Enemy Situation"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
+                android:text="0"
+                android:textSize="12sp"
+                android:textColor="#00FF00"
+                android:layout_marginEnd="8dp"/>
 
-            <Switch
-                android:id="@+id/espBoxSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="ESP Box"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <Switch
-                android:id="@+id/healthBarSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Health Bar"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <!-- Aim Section -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🎯 AIM CONTROL"
-                android:textColor="#00FFFF"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:layout_marginTop="16dp"/>
+                android:text="FPS"
+                android:textSize="10sp"
+                android:textColor="#888888"
+                android:layout_marginEnd="12dp"/>
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
+            <Button
+                android:id="@+id/minimizeButton"
+                android:layout_width="24dp"
+                android:layout_height="24dp"
+                android:text="−"
+                android:textSize="16sp"
                 android:background="#333333"
-                android:layout_marginVertical="8dp"/>
-
-            <Switch
-                android:id="@+id/aimAssistSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Aim Assist"
                 android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
+                android:padding="0dp"/>
 
-            <Switch
-                android:id="@+id/hardAimbotSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Hard Aimbot"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
+        </LinearLayout>
 
-            <Switch
-                android:id="@+id/flickBoostSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Flick Boost"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <!-- Stealth Section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="🛡️ STEALTH"
-                android:textColor="#00FFFF"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:layout_marginTop="16dp"/>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#333333"
-                android:layout_marginVertical="8dp"/>
-
-            <Switch
-                android:id="@+id/ghostModeSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Ghost Mode"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <Switch
-                android:id="@+id/safeOverlaySwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Safe Overlay"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <!-- Performance Section -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="⚙️ PERFORMANCE"
-                android:textColor="#00FFFF"
-                android:textSize="12sp"
-                android:textStyle="bold"
-                android:layout_marginTop="16dp"/>
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#333333"
-                android:layout_marginVertical="8dp"/>
-
-            <Switch
-                android:id="@+id/cacheSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Cache: 16MB"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <Switch
-                android:id="@+id/refreshSwitch"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="Auto Refresh"
-                android:textColor="#FFFFFF"
-                android:layout_marginTop="4dp"/>
-
-            <!-- Stats Footer -->
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#333333"
-                android:layout_marginTop="16dp"/>
+        <!-- Scrollable Content -->
+        <ScrollView
+            android:id="@+id/scrollContent"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:maxHeight="400dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:weightSum="3"
-                android:layout_marginTop="12dp">
+                android:orientation="vertical"
+                android:padding="12dp">
 
+                <!-- ESP Section -->
                 <TextView
-                    android:layout_width="0dp"
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="Mode:"
-                    android:textSize="10sp"
-                    android:textColor="#888888"/>
+                    android:text="🎯 ESP CONTROL"
+                    android:textSize="14sp"
+                    android:textColor="#00FFFF"
+                    android:textStyle="bold"
+                    android:layout_marginTop="8dp"/>
 
-                <TextView
-                    android:id="@+id/modeValue"
-                    android:layout_width="0dp"
-                    android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="..."
-                    android:textSize="10sp"
-                    android:textColor="#FFD700"/>
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#333333"
+                    android:layout_marginVertical="8dp"/>
 
-                <TextView
-                    android:id="@+id/targetsValue"
-                    android:layout_width="0dp"
+                <Switch
+                    android:id="@+id/enemySituationSwitch"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:text="0"
-                    android:textSize="10sp"
+                    android:text="Enemy Situation"
                     android:textColor="#FFFFFF"
-                    android:gravity="end"/>
+                    android:checked="true"/>
+
+                <Switch
+                    android:id="@+id/espBoxSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="ESP Box"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"
+                    android:layout_marginTop="8dp"/>
+
+                <Switch
+                    android:id="@+id/healthBarSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Health Bar"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"
+                    android:layout_marginTop="8dp"/>
+
+                <!-- Aim Section -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🎯 AIM CONTROL"
+                    android:textSize="14sp"
+                    android:textColor="#00FFFF"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp"/>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#333333"
+                    android:layout_marginVertical="8dp"/>
+
+                <Switch
+                    android:id="@+id/aimAssistSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Aim Assist"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"/>
+
+                <Switch
+                    android:id="@+id/hardAimbotSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Hard Aimbot"
+                    android:textColor="#FFFFFF"
+                    android:checked="false"
+                    android:layout_marginTop="8dp"/>
+
+                <Switch
+                    android:id="@+id/flickBoostSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Flick Boost"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"
+                    android:layout_marginTop="8dp"/>
+
+                <!-- Stealth Section -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="🛡️ STEALTH"
+                    android:textSize="14sp"
+                    android:textColor="#00FFFF"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp"/>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#333333"
+                    android:layout_marginVertical="8dp"/>
+
+                <Switch
+                    android:id="@+id/ghostModeSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Ghost Mode"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"/>
+
+                <Switch
+                    android:id="@+id/safeOverlaySwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Safe Overlay"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"
+                    android:layout_marginTop="8dp"/>
+
+                <!-- Performance Section -->
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⚙️ PERFORMANCE"
+                    android:textSize="14sp"
+                    android:textColor="#00FFFF"
+                    android:textStyle="bold"
+                    android:layout_marginTop="16dp"/>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#333333"
+                    android:layout_marginVertical="8dp"/>
+
+                <Switch
+                    android:id="@+id/cacheSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Cache: 16MB"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"/>
+
+                <Switch
+                    android:id="@+id/refreshSwitch"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="Refresh: AUTO"
+                    android:textColor="#FFFFFF"
+                    android:checked="true"
+                    android:layout_marginTop="8dp"/>
+
+                <!-- Stats Footer -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="#333333"
+                    android:layout_marginTop="16dp"/>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:weightSum="3"
+                    android:layout_marginTop="12dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="Mode:"
+                        android:textSize="10sp"
+                        android:textColor="#888888"/>
+
+                    <TextView
+                        android:id="@+id/modeValue"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="..."
+                        android:textSize="10sp"
+                        android:textColor="#FFD700"/>
+
+                    <TextView
+                        android:id="@+id/targetsValue"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="0"
+                        android:textSize="10sp"
+                        android:textColor="#FFFFFF"
+                        android:gravity="end"/>
+
+                </LinearLayout>
 
             </LinearLayout>
 
-        </LinearLayout>
+        </ScrollView>
 
-    </ScrollView>
+    </LinearLayout>
 
-</LinearLayout>
+</androidx.cardview.widget.CardView>
