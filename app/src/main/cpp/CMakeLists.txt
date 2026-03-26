@@ -5,10 +5,15 @@ set(CMAKE_CXX_STANDARD 17)
 
 set(OPENSSL_DIR ${CMAKE_SOURCE_DIR}/openssl/${ANDROID_ABI})
 
-# إضافة المسارات التي تحتوي على الملفات الرأسية وملفات الإعدادات
+file(GLOB_RECURSE CONF_PATH "${OPENSSL_DIR}/include/*/opensslconf.h")
+if(CONF_PATH)
+    list(GET CONF_PATH 0 FIRST_CONF_PATH)
+    get_filename_component(CONF_DIR ${FIRST_CONF_PATH} DIRECTORY)
+    include_directories(${CONF_DIR})
+endif()
+
 include_directories(${OPENSSL_DIR}/include)
 include_directories(${OPENSSL_DIR}/include/openssl)
-include_directories(${OPENSSL_DIR}/include/aarch64-linux-android)
 
 add_library(ssl STATIC IMPORTED)
 set_target_properties(ssl PROPERTIES IMPORTED_LOCATION ${OPENSSL_DIR}/lib/libssl.a)
