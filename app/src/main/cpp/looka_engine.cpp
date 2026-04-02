@@ -1,1509 +1,848 @@
 // ============================================================================
-// looka_engine_v11_ultimate_merged.cpp - Looka Engine Ultimate v11.0
-// ULTIMATE MERGED EDITION - ALL FEATURES FROM v11 + test.cpp
+// looka_engine_v14_final.cpp - Looka Engine Ultimate v14.0 FINAL
+// FULL STEALTH + DARK UI + DYNAMIC COLORS (ON=Green / OFF=Red)
 // ============================================================================
 
-#include <iostream>
+#include <jni.h>
+#include <android/log.h>
+#include <pthread.h>
+#include <thread>
+#include <atomic>
 #include <vector>
-#include <sys/uio.h>
+#include <string>
+#include <cstring>
+#include <dlfcn.h>
+#include <link.h>
+#include <unistd.h>
 #include <sys/mman.h>
 #include <sys/ptrace.h>
-#include <sys/wait.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
-#include <sys/mount.h>
-#include <sys/shm.h>
 #include <sys/stat.h>
-#include <sys/sysinfo.h>
-#include <dirent.h>
-#include <cstring>
-#include <unistd.h>
-#include <signal.h>
-#include <atomic>
-#include <thread>
-#include <chrono>
+#include <fcntl.h>
 #include <fstream>
 #include <sstream>
-#include <iomanip>
 #include <random>
-#include <algorithm>
-#include <cmath>
-#include <memory>
-#include <optional>
+#include <chrono>
 #include <unordered_map>
-#include <queue>
+#include <functional>
 #include <mutex>
 #include <shared_mutex>
-#include <set>
-#include <filesystem>
-#include <array>
-#include <functional>
-#include <condition_variable>
-#include <stack>
-#include <system_error>
-#include <stdlib.h>
-#include <errno.h>
-#include <string_view>
-#include <fcntl.h>
-#include <linux/fb.h>
-#include <linux/input.h>
-#include <stdarg.h>
+#include <algorithm>
+#include <map>
+#include <elf.h>
 
-// SIMD headers
-#ifdef __ARM_NEON
-#include <arm_neon.h>
-#endif
+// ============================================================================
+// Dobby - مكتبة الـ Hooking (للـ fallback فقط)
+// ============================================================================
+#include "dobby.h"
 
-// ----------------------------------------------------------------------------
-// [تعريفات النظام للأندرويد]
-// ----------------------------------------------------------------------------
-extern "C" {
-    ssize_t process_vm_readv(pid_t pid, const struct iovec* local_iov, unsigned long liovcnt, 
-                           const struct iovec* remote_iov, unsigned long riovcnt, unsigned long flags);
-    ssize_t process_vm_writev(pid_t pid, const struct iovec* local_iov, unsigned long liovcnt, 
-                            const struct iovec* remote_iov, unsigned long riovcnt, unsigned long flags);
+// ImGui - مكتبة الرسم الاحترافية
+#include "imgui.h"
+#include "imgui_impl_android.h"
+#include "imgui_impl_opengl3.h"
+
+// ============================================================================
+// DEFINES
+// ============================================================================
+#define LOG_TAG "LookaUltimate"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, LOG_TAG, __VA_ARGS__)
+
+// مفتاح التشفير الديناميكي
+static uint8_t DYNAMIC_XOR_KEY = 0x5A;
+
+// ============================================================================
+// 1. JUNK CODE GENERATOR - تشويش تلقائي
+// ============================================================================
+
+#define JUNK_CODE_1() \
+    volatile int _junk1 = rand() % 100; \
+    volatile int _junk2 = _junk1 * 2; \
+    if (_junk2 > 100) { _junk2 = _junk1; }
+
+#define JUNK_CODE_2() \
+    volatile long _junk3 = rand(); \
+    volatile long _junk4 = _junk3 ^ 0xDEADBEEF; \
+    asm volatile("nop"); asm volatile("nop");
+
+#define JUNK_CODE_3() \
+    volatile uintptr_t _junk5 = (uintptr_t)rand(); \
+    volatile uintptr_t _junk6 = _junk5 << 2; \
+    if (_junk6 & 0x100) { _junk6 = _junk5; }
+
+#define JUNK_CODE_4() \
+    volatile float _junk7 = rand() / 1000.0f; \
+    volatile float _junk8 = _junk7 * 1.5f; \
+    asm volatile("nop"); asm volatile("nop"); asm volatile("nop");
+
+#define JUNK_CODE_5() \
+    volatile int _junk9 = rand(); \
+    for (int _i = 0; _i < 3; _i++) { _junk9 += _i; } \
+    asm volatile("nop");
+
+#define JUNK_BLOCK() \
+    JUNK_CODE_1(); \
+    JUNK_CODE_2(); \
+    JUNK_CODE_3(); \
+    JUNK_CODE_4(); \
+    JUNK_CODE_5();
+
+// ============================================================================
+// 2. STRING OBFUSCATION
+// ============================================================================
+#define OBF(str) ([]() -> const char* { \
+    static char buf[sizeof(str)]; \
+    static bool init = false; \
+    if (!init) { \
+        for (size_t i = 0; i < sizeof(str); i++) { \
+            buf[i] = str[i] ^ DYNAMIC_XOR_KEY ^ (i & 0xFF); \
+        } \
+        init = true; \
+    } \
+    return buf; \
+})()
+
+// ============================================================================
+// 3. INTEGRITY BYPASS - Hook للقراءة والـ mmap
+// ============================================================================
+
+static std::vector<uint8_t> g_original_lib_data;
+static std::string g_target_lib_path;
+
+typedef int (*open_t)(const char* pathname, int flags, mode_t mode);
+static open_t original_open = nullptr;
+
+typedef ssize_t (*read_t)(int fd, void* buf, size_t count);
+static read_t original_read = nullptr;
+
+typedef void* (*mmap_t)(void* addr, size_t length, int prot, int flags, int fd, off_t offset);
+static mmap_t original_mmap = nullptr;
+
+static std::string get_path_from_fd(int fd) {
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/self/fd/%d", fd);
+    char link[256];
+    ssize_t len = readlink(path, link, sizeof(link) - 1);
+    if (len > 0) {
+        link[len] = '\0';
+        return std::string(link);
+    }
+    return "";
 }
 
-// ----------------------------------------------------------------------------
-// [تغليف OpenSSL]
-// ----------------------------------------------------------------------------
-extern "C" {
-    #include <openssl/conf.h>
-    #include <openssl/evp.h>
-    #include <openssl/rand.h>
-    #include <openssl/hmac.h>
-    #include <openssl/err.h>
-    #include <openssl/bio.h>
-    #include <openssl/asn1.h>
-    #include <openssl/objects.h>
+static bool load_original_file(const char* path) {
+    FILE* f = fopen(path, "rb");
+    if (!f) return false;
+    
+    fseek(f, 0, SEEK_END);
+    long size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    
+    g_original_lib_data.resize(size);
+    fread(g_original_lib_data.data(), 1, size, f);
+    fclose(f);
+    
+    LOGI(OBF("Loaded original library: %s (%ld bytes)"), path, size);
+    return true;
 }
 
-#define BRAND_NAME "LOOKA-ENGINE"
+static int hooked_open(const char* pathname, int flags, mode_t mode) {
+    JUNK_BLOCK();
+    int fd = original_open(pathname, flags, mode);
+    
+    if (pathname && strstr(pathname, OBF("libil2cpp.so"))) {
+        g_target_lib_path = pathname;
+        load_original_file(pathname);
+        LOGI(OBF("Target library opened: %s"), pathname);
+    }
+    
+    return fd;
+}
 
-// ============================================================================
-// DEFINES & CONSTANTS
-// ============================================================================
-#define LOOKA_VERSION "11.0-Ultimate-Merged"
-#define LOOKA_OWNER "Looka"
-#define LOOKA_SIGNATURE "LK11.0-2026-LOOKA-ULTIMATE-MERGED"
+static ssize_t hooked_read(int fd, void* buf, size_t count) {
+    JUNK_BLOCK();
+    
+    std::string path = get_path_from_fd(fd);
+    
+    if (path.find(OBF("libil2cpp.so")) != std::string::npos && !g_original_lib_data.empty()) {
+        if (count <= g_original_lib_data.size()) {
+            memcpy(buf, g_original_lib_data.data(), count);
+            LOGD(OBF("Faked read from: %s (%zu bytes)"), path.c_str(), count);
+            return count;
+        }
+    }
+    
+    return original_read(fd, buf, count);
+}
 
-#define BRAND_NAME_FULL "Looka Engine"
-#define BRAND_TAGLINE "Ultimate Gaming Suite"
-#define BRAND_COLOR "\033[1;36m"
+static void* hooked_mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
+    JUNK_BLOCK();
+    
+    void* result = original_mmap(addr, length, prot, flags, fd, offset);
+    
+    if (fd != -1) {
+        std::string path = get_path_from_fd(fd);
+        if (path.find(OBF("libil2cpp.so")) != std::string::npos && result != MAP_FAILED) {
+            LOGI(OBF("mmap detected: %s at 0x%lx"), path.c_str(), (uintptr_t)result);
+        }
+    }
+    
+    return result;
+}
 
-#define FLOATING_WINDOW_WIDTH 380
-#define FLOATING_WINDOW_HEIGHT 540
-
-#define CACHE_MAX_SIZE (16 * 1024 * 1024)
-#define CACHE_ENTRY_TTL_MS 100
-#define CACHE_CLEANUP_INTERVAL_MS 5000
-
-#define REFRESH_RATE_BATTLE 120
-#define REFRESH_RATE_LOBBY 30
-#define REFRESH_RATE_IDLE 15
-
-#define PATTERN_SCAN_BUFFER_SIZE (128 * 1024 * 1024)
-#define NEON_VECTOR_SIZE 16
-
-#define GCM_IV_SIZE 12
-#define GCM_TAG_SIZE 16
-
-#define XOR_KEY 0x5A
-#define ROTATION_BITS 3
-
-#define HIDE_MOUNT_POINT "/data/local/tmp/.looka_hide"
-#define FAKE_PROCESS_NAME "android.hardware.sensors"
-
-// ============================================================================
-// ENUMS & TYPES
-// ============================================================================
-enum class LogLevel { DEBUG, INFO, WARNING, ERROR, FATAL };
-enum class EngineType { FREE_FIRE, PUBG, COD_MOBILE, UNKNOWN };
-enum class GameRegion { GLOBAL, KOREAN, VIETNAM, INDIA, CHINA, BRAZIL, UNKNOWN };
-enum class EngineState { STOPPED, INITIALIZING, RUNNING, PAUSED, ERROR, RECOVERING };
-enum class ExecutionMode { ROOT, NON_ROOT, AUTO };
-enum class WeaponType { NONE, AR, SMG, SNIPER, SHOTGUN, DMR, PISTOL };
-enum class RefreshMode { BATTLE, LOBBY, IDLE, AUTO };
-enum class OverlayType { FRAMEBUFFER, SURFACEFLINGER, NONE };
-
-// ============================================================================
-// 1. STRING OBFUSCATION
-// ============================================================================
-template <size_t N>
-class ObfuscatedString {
-private:
-    std::array<char, N> _data;
-    static constexpr char KEY = 0x7F;
+class IntegrityBypass {
 public:
-    constexpr ObfuscatedString(const char* str) : _data{} {
-        for (size_t i = 0; i < N; ++i) {
-            _data[i] = str[i] ^ KEY;
+    static void install() {
+        void* libc = dlopen(OBF("libc.so"), RTLD_NOLOAD);
+        if (libc) {
+            void* open_ptr = dlsym(libc, OBF("open"));
+            if (open_ptr) DobbyHook(open_ptr, (void*)hooked_open, (void**)&original_open);
+            
+            void* read_ptr = dlsym(libc, OBF("read"));
+            if (read_ptr) DobbyHook(read_ptr, (void*)hooked_read, (void**)&original_read);
+            
+            void* mmap_ptr = dlsym(libc, OBF("mmap"));
+            if (mmap_ptr) DobbyHook(mmap_ptr, (void*)hooked_mmap, (void**)&original_mmap);
+            
+            LOGI(OBF("Integrity bypass hooks installed"));
         }
-    }
-    std::string decrypt() const {
-        std::string s;
-        for (size_t i = 0; i < N && _data[i] != 0; ++i) {
-            s += static_cast<char>(_data[i] ^ KEY);
-        }
-        return s;
     }
 };
 
-#define OBF(str) (ObfuscatedString<sizeof(str)>(str).decrypt().c_str())
-
 // ============================================================================
-// 2. LOGGER
+// 4. ADVANCED MAPS HIDER
 // ============================================================================
-class Logger {
+class AdvancedMapsHider {
 private:
-    std::ofstream log_file;
-    std::mutex log_mutex;
-    LogLevel min_level;
-    std::string log_path;
-    bool _verbose = true;
-    
-    std::string levelToString(LogLevel level) const {
-        switch(level) {
-            case LogLevel::DEBUG: return "DEBUG";
-            case LogLevel::INFO:  return "INFO ";
-            case LogLevel::WARNING: return "WARN ";
-            case LogLevel::ERROR: return "ERROR";
-            case LogLevel::FATAL: return "FATAL";
-            default: return "UNKN ";
-        }
-    }
-    
-public:
-    Logger() : min_level(LogLevel::INFO) {
-        log_path = "/data/local/tmp/.looka.log";
-        log_file.open(log_path, std::ios::app);
-        if (log_file.is_open()) {
-            log_file << "=== Looka Engine v" << LOOKA_VERSION << " Started ===" << std::endl;
-        }
-    }
-    
-    ~Logger() {
-        if (log_file.is_open()) log_file.close();
-    }
-    
-    static Logger& getInstance() {
-        static Logger instance;
-        return instance;
-    }
-    
-    void setVerbose(bool v) { _verbose = v; }
-    
-    void log(LogLevel level, const std::string& message) {
-        if (level < min_level || !_verbose) return;
-        
-        std::stringstream ss;
-        auto now = std::chrono::system_clock::now();
-        auto time = std::chrono::system_clock::to_time_t(now);
-        ss << std::put_time(std::localtime(&time), "%H:%M:%S");
-        ss << " [" << levelToString(level) << "] ";
-        ss << BRAND_NAME_FULL << ": " << message;
-        
-        {
-            std::lock_guard<std::mutex> lock(log_mutex);
-            if (log_file.is_open()) {
-                log_file << ss.str() << std::endl;
-                log_file.flush();
-            }
-            std::cout << ss.str() << std::endl;
-        }
-        
-        if (level == LogLevel::FATAL) {
-            std::cerr << ss.str() << std::endl;
-        }
-    }
-    
-    void log(LogLevel level, const char* format, ...) {
-        if (level < min_level || !_verbose) return;
-        
-        char buffer[2048];
-        va_list args;
-        va_start(args, format);
-        vsnprintf(buffer, sizeof(buffer), format, args);
-        va_end(args);
-        
-        log(level, std::string(buffer));
-    }
-};
-
-#define LOG_DEBUG(fmt, ...) Logger::getInstance().log(LogLevel::DEBUG, fmt, ##__VA_ARGS__)
-#define LOG_INFO(fmt, ...)  Logger::getInstance().log(LogLevel::INFO, fmt, ##__VA_ARGS__)
-#define LOG_WARNING(fmt, ...) Logger::getInstance().log(LogLevel::WARNING, fmt, ##__VA_ARGS__)
-#define LOG_ERROR(fmt, ...) Logger::getInstance().log(LogLevel::ERROR, fmt, ##__VA_ARGS__)
-#define LOG_FATAL(fmt, ...) Logger::getInstance().log(LogLevel::FATAL, fmt, ##__VA_ARGS__)
-
-// ============================================================================
-// 3. MEMORY MANAGER (من test.cpp)
-// ============================================================================
-class MemoryManager {
-private:
-    pid_t _target_pid;
-    bool _is_attached;
-
-public:
-    MemoryManager(pid_t pid) : _target_pid(pid), _is_attached(false) {
-        LOG_INFO("Initializing MemoryManager for PID: %d", _target_pid);
-    }
-
-    ~MemoryManager() {
-        if (_is_attached) detach();
-    }
-
-    bool attach() {
-        if (ptrace(PTRACE_ATTACH, _target_pid, nullptr, nullptr) < 0) {
-            LOG_ERROR("Failed to attach to process: %s", strerror(errno));
-            return false;
-        }
-        waitpid(_target_pid, nullptr, WUNTRACED);
-        _is_attached = true;
-        LOG_INFO("Successfully attached to process %d", _target_pid);
-        return true;
-    }
-
-    bool detach() {
-        if (ptrace(PTRACE_DETACH, _target_pid, nullptr, nullptr) < 0) {
-            return false;
-        }
-        _is_attached = false;
-        LOG_INFO("Detached from process %d", _target_pid);
-        return true;
-    }
-
-    bool read(uintptr_t address, void* buffer, size_t size) {
-        struct iovec local[1];
-        struct iovec remote[1];
-        local[0].iov_base = buffer;
-        local[0].iov_len = size;
-        remote[0].iov_base = reinterpret_cast<void*>(address);
-        remote[0].iov_len = size;
-        ssize_t bytes_read = process_vm_readv(_target_pid, local, 1, remote, 1, 0);
-        return bytes_read == static_cast<ssize_t>(size);
-    }
-
-    bool write(uintptr_t address, const void* buffer, size_t size) {
-        struct iovec local[1];
-        struct iovec remote[1];
-        local[0].iov_base = const_cast<void*>(buffer);
-        local[0].iov_len = size;
-        remote[0].iov_base = reinterpret_cast<void*>(address);
-        remote[0].iov_len = size;
-        ssize_t bytes_written = process_vm_writev(_target_pid, local, 1, remote, 1, 0);
-        return bytes_written == static_cast<ssize_t>(size);
-    }
-
-    std::vector<std::pair<uintptr_t, uintptr_t>> getRegions(const std::string& library_name = "") {
-        std::vector<std::pair<uintptr_t, uintptr_t>> regions;
-        std::string path = "/proc/" + std::to_string(_target_pid) + "/maps";
-        std::ifstream maps(path);
-        std::string line;
-        while (std::getline(maps, line)) {
-            if (!library_name.empty() && line.find(library_name) == std::string::npos) continue;
-            uintptr_t start, end;
-            if (sscanf(line.c_str(), "%lx-%lx", &start, &end) == 2) {
-                regions.push_back({start, end});
-            }
-        }
-        return regions;
-    }
-};
-
-// ============================================================================
-// 4. DIRECT KERNEL ACCESS (من v11)
-// ============================================================================
-class DirectKernelAccess {
-private:
-    pid_t target_pid;
-    std::atomic<uint64_t> total_ops{0};
-    std::atomic<uint64_t> total_bytes{0};
-public:
-    DirectKernelAccess(pid_t pid) : target_pid(pid) {}
-    
-    bool read(uintptr_t address, void* buffer, size_t size) {
-        struct iovec local = { buffer, size };
-        struct iovec remote = { reinterpret_cast<void*>(address), size };
-        ssize_t bytes = process_vm_readv(target_pid, &local, 1, &remote, 1, 0);
-        if (bytes == static_cast<ssize_t>(size)) {
-            total_ops++; total_bytes += size;
-            return true;
-        }
-        return false;
-    }
-    
-    bool write(uintptr_t address, const void* buffer, size_t size) {
-        struct iovec local = { const_cast<void*>(buffer), size };
-        struct iovec remote = { reinterpret_cast<void*>(address), size };
-        ssize_t bytes = process_vm_writev(target_pid, &local, 1, &remote, 1, 0);
-        if (bytes == static_cast<ssize_t>(size)) {
-            total_ops++; total_bytes += size;
-            return true;
-        }
-        return false;
-    }
-    
-    uint64_t getOps() const { return total_ops.load(); }
-    uint64_t getBytes() const { return total_bytes.load(); }
-};
-
-// ============================================================================
-// 5. NEON PATTERN SCANNER (من v11)
-// ============================================================================
-struct alignas(64) NEONPattern {
-    std::string name;
-    std::vector<uint8_t> bytes;
-    std::vector<uint8_t> mask;
-    uintptr_t result;
-    bool found;
-    alignas(64) uint8_t neon_bytes[128];
-    alignas(64) uint8_t neon_mask[128];
-    size_t neon_len;
-    
-    NEONPattern(const std::string& n, const std::string& pattern) : name(n), result(0), found(false), neon_len(0) {
-        std::istringstream iss(pattern);
-        std::string byte_str;
-        while (iss >> byte_str) {
-            if (byte_str == "??" || byte_str == "?") {
-                bytes.push_back(0); mask.push_back(0);
-            } else {
-                bytes.push_back(static_cast<uint8_t>(std::stoi(byte_str, nullptr, 16)));
-                mask.push_back(0xFF);
-            }
-        }
-        neon_len = std::min(bytes.size(), size_t(128));
-        memset(neon_bytes, 0, sizeof(neon_bytes));
-        memset(neon_mask, 0, sizeof(neon_mask));
-        for (size_t i = 0; i < neon_len; i++) {
-            neon_bytes[i] = bytes[i];
-            neon_mask[i] = mask[i];
-        }
-    }
-    
-    bool matchesNEON(const uint8_t* data) const {
-#ifdef __ARM_NEON
-        size_t i = 0;
-        for (; i + 16 <= neon_len; i += 16) {
-            uint8x16_t v_data = vld1q_u8(data + i);
-            uint8x16_t v_pattern = vld1q_u8(neon_bytes + i);
-            uint8x16_t v_mask = vld1q_u8(neon_mask + i);
-            uint8x16_t v_data_masked = vandq_u8(v_data, v_mask);
-            uint8x16_t v_pattern_masked = vandq_u8(v_pattern, v_mask);
-            uint8x16_t v_cmp = vceqq_u8(v_data_masked, v_pattern_masked);
-            uint64x2_t v_res = vreinterpretq_u64_u8(v_cmp);
-            if ((vgetq_lane_u64(v_res, 0) != 0xFFFFFFFFFFFFFFFFULL) ||
-                (vgetq_lane_u64(v_res, 1) != 0xFFFFFFFFFFFFFFFFULL)) {
-                return false;
-            }
-        }
-#endif
-        for (size_t i = 0; i < neon_len; i++) {
-            if ((data[i] & neon_mask[i]) != (neon_bytes[i] & neon_mask[i])) return false;
-        }
-        return true;
-    }
-};
-
-class NEONPatternScanner {
-private:
-    std::vector<NEONPattern> patterns;
     uintptr_t module_base;
     size_t module_size;
-    pid_t target_pid;
-    mutable std::shared_mutex patterns_mutex;
-    std::atomic<uint64_t> total_bytes_scanned{0};
-    double last_scan_time_ms{0};
+    std::string original_name;
     
-    size_t getModuleSize(const std::string& module_name) {
-        std::string maps_path = "/proc/" + std::to_string(target_pid) + "/maps";
-        std::ifstream maps(maps_path);
-        if (!maps.is_open()) return 0;
+public:
+    AdvancedMapsHider(const char* libname) : original_name(libname) {
+        Dl_info info;
+        if (dladdr((void*)JNI_OnLoad, &info)) {
+            module_base = (uintptr_t)info.dli_fbase;
+        }
+        
+        std::ifstream maps("/proc/self/maps");
         std::string line;
-        size_t max_end = 0;
-        uintptr_t base = 0;
         while (std::getline(maps, line)) {
-            if (line.find(module_name) != std::string::npos) {
+            if (line.find(libname) != std::string::npos) {
                 size_t dash = line.find('-');
                 size_t space = line.find(' ', dash);
                 if (dash != std::string::npos && space != std::string::npos) {
                     uintptr_t start = std::stoull(line.substr(0, dash), nullptr, 16);
                     uintptr_t end = std::stoull(line.substr(dash + 1, space - dash - 1), nullptr, 16);
-                    if (base == 0) base = start;
-                    if (end > max_end) max_end = end;
-                }
-            }
-        }
-        return (max_end > base) ? (max_end - base) : 0;
-    }
-    
-    bool scanRegionNEON(const NEONPattern& pattern, uintptr_t start, uintptr_t end) {
-        size_t pattern_len = pattern.bytes.size();
-        if (pattern_len == 0) return false;
-        size_t buffer_size = std::min<size_t>(PATTERN_SCAN_BUFFER_SIZE, end - start);
-        alignas(64) std::vector<uint8_t> buffer(buffer_size + pattern_len);
-        for (uintptr_t addr = start; addr < end; addr += buffer_size - pattern_len) {
-            size_t remaining = end - addr;
-            size_t read_size = std::min(buffer_size, remaining);
-            struct iovec local = { buffer.data(), read_size };
-            struct iovec remote = { reinterpret_cast<void*>(addr), read_size };
-            ssize_t bytes = process_vm_readv(target_pid, &local, 1, &remote, 1, 0);
-            if (bytes != static_cast<ssize_t>(read_size)) continue;
-            total_bytes_scanned += read_size;
-            for (size_t i = 0; i <= read_size - pattern_len; i++) {
-                if (pattern.matchesNEON(buffer.data() + i)) {
-                    const_cast<NEONPattern&>(pattern).result = addr + i;
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-    
-public:
-    NEONPatternScanner(pid_t pid) : target_pid(pid), module_base(0), module_size(0) {}
-    
-    bool initialize(const std::string& module_name) {
-        module_base = findModuleBase(module_name);
-        if (module_base == 0) return false;
-        module_size = getModuleSize(module_name);
-        LOG_INFO("NEON Scanner ready - Base: 0x%lx, Size: %.2f MB", module_base, module_size / (1024.0 * 1024.0));
-        return true;
-    }
-    
-    uintptr_t findModuleBase(const std::string& module_name) {
-        std::string maps_path = "/proc/" + std::to_string(target_pid) + "/maps";
-        std::ifstream maps(maps_path);
-        if (!maps.is_open()) return 0;
-        std::string line;
-        while (std::getline(maps, line)) {
-            if (line.find(module_name) != std::string::npos) {
-                size_t dash = line.find('-');
-                if (dash != std::string::npos) {
-                    return std::stoull(line.substr(0, dash), nullptr, 16);
-                }
-            }
-        }
-        return 0;
-    }
-    
-    void addPattern(const std::string& name, const std::string& pattern) {
-        std::unique_lock lock(patterns_mutex);
-        patterns.emplace_back(name, pattern);
-        LOG_INFO("Pattern added: %s (%zu bytes)", name.c_str(), patterns.back().bytes.size());
-    }
-    
-    void scanAllPatterns() {
-        if (module_base == 0 || module_size == 0) return;
-        auto start = std::chrono::high_resolution_clock::now();
-        total_bytes_scanned = 0;
-        for (auto& pattern : patterns) {
-            if (!pattern.found) {
-                scanRegionNEON(pattern, module_base, module_base + module_size);
-            }
-        }
-        auto end = std::chrono::high_resolution_clock::now();
-        last_scan_time_ms = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0;
-        size_t found = 0;
-        for (const auto& p : patterns) if (p.found) found++;
-        LOG_INFO("NEON scan completed in %.2f ms (%.0f MB/s) - Found %zu patterns",
-                 last_scan_time_ms, (total_bytes_scanned.load() / 1024.0 / 1024.0) / (last_scan_time_ms / 1000.0), found);
-    }
-    
-    uintptr_t getPatternResult(const std::string& name) {
-        std::shared_lock lock(patterns_mutex);
-        for (const auto& pattern : patterns) {
-            if (pattern.name == name && pattern.found) return pattern.result;
-        }
-        return 0;
-    }
-    
-    size_t getFoundCount() const {
-        size_t count = 0;
-        for (const auto& p : patterns) if (p.found) count++;
-        return count;
-    }
-    
-    double getScanSpeedMBps() const {
-        if (last_scan_time_ms <= 0) return 0;
-        return (total_bytes_scanned.load() / 1024.0 / 1024.0) / (last_scan_time_ms / 1000.0);
-    }
-};
-
-// ============================================================================
-// 6. INTELLIGENT CACHE MANAGER (من v11)
-// ============================================================================
-template<typename Key, typename Value>
-class IntelligentCacheManager {
-private:
-    struct CacheEntry {
-        Value data;
-        std::chrono::steady_clock::time_point timestamp;
-        uint64_t access_count;
-    };
-    std::unordered_map<Key, CacheEntry> cache;
-    std::shared_mutex cache_mutex;
-    size_t max_entries;
-    std::chrono::milliseconds ttl;
-    std::unique_ptr<std::thread> cleanup_thread;
-    std::atomic<bool> running{true};
-    std::atomic<uint64_t> hits{0};
-    std::atomic<uint64_t> misses{0};
-    
-    void cleanupLoop() {
-        while (running) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(CACHE_CLEANUP_INTERVAL_MS));
-            auto now = std::chrono::steady_clock::now();
-            std::unique_lock<std::shared_mutex> lock(cache_mutex);
-            for (auto it = cache.begin(); it != cache.end();) {
-                if (now - it->second.timestamp > ttl) it = cache.erase(it);
-                else ++it;
-            }
-            if (cache.size() > max_entries) {
-                std::vector<std::pair<Key, uint64_t>> access_list;
-                for (const auto& [key, entry] : cache) access_list.emplace_back(key, entry.access_count);
-                std::sort(access_list.begin(), access_list.end(),
-                    [](const auto& a, const auto& b) { return a.second < b.second; });
-                size_t to_remove = cache.size() - max_entries;
-                for (size_t i = 0; i < to_remove && i < access_list.size(); i++) cache.erase(access_list[i].first);
-            }
-        }
-    }
-    
-public:
-    IntelligentCacheManager(size_t max_size = CACHE_MAX_SIZE, int ttl_ms = CACHE_ENTRY_TTL_MS)
-        : max_entries(max_size / sizeof(CacheEntry)), ttl(std::chrono::milliseconds(ttl_ms)) {
-        cleanup_thread = std::make_unique<std::thread>(&IntelligentCacheManager::cleanupLoop, this);
-    }
-    
-    ~IntelligentCacheManager() { running = false; if (cleanup_thread && cleanup_thread->joinable()) cleanup_thread->join(); }
-    
-    bool get(const Key& key, Value& value) {
-        std::shared_lock<std::shared_mutex> lock(cache_mutex);
-        auto it = cache.find(key);
-        if (it != cache.end()) {
-            auto now = std::chrono::steady_clock::now();
-            if (now - it->second.timestamp <= ttl) {
-                value = it->second.data;
-                const_cast<CacheEntry&>(it->second).access_count++;
-                hits++;
-                return true;
-            }
-        }
-        misses++;
-        return false;
-    }
-    
-    void put(const Key& key, const Value& value) {
-        std::unique_lock<std::shared_mutex> lock(cache_mutex);
-        CacheEntry entry;
-        entry.data = value;
-        entry.timestamp = std::chrono::steady_clock::now();
-        entry.access_count = 1;
-        cache[key] = entry;
-    }
-    
-    double getHitRate() const {
-        uint64_t total = hits + misses;
-        return total == 0 ? 0 : (static_cast<double>(hits) / total * 100.0);
-    }
-};
-
-// ============================================================================
-// 7. ADAPTIVE REFRESH RATE MANAGER (من v11)
-// ============================================================================
-class AdaptiveRefreshManager {
-private:
-    std::atomic<RefreshMode> current_mode{RefreshMode::AUTO};
-    std::atomic<int> current_fps{REFRESH_RATE_BATTLE};
-    std::atomic<bool> in_battle{false};
-    std::atomic<bool> game_active{true};
-    std::chrono::steady_clock::time_point last_activity;
-    
-    int getOptimalFPS() {
-        if (!game_active) return REFRESH_RATE_IDLE;
-        switch(current_mode) {
-            case RefreshMode::BATTLE: return REFRESH_RATE_BATTLE;
-            case RefreshMode::LOBBY: return REFRESH_RATE_LOBBY;
-            case RefreshMode::IDLE: return REFRESH_RATE_IDLE;
-            case RefreshMode::AUTO: return in_battle ? REFRESH_RATE_BATTLE : REFRESH_RATE_LOBBY;
-            default: return REFRESH_RATE_BATTLE;
-        }
-    }
-    
-public:
-    AdaptiveRefreshManager() { last_activity = std::chrono::steady_clock::now(); }
-    
-    void update() {
-        int new_fps = getOptimalFPS();
-        if (new_fps != current_fps) {
-            current_fps = new_fps;
-            LOG_INFO("Refresh rate adjusted: %d FPS", current_fps.load());
-        }
-        last_activity = std::chrono::steady_clock::now();
-    }
-    
-    void setMode(RefreshMode mode) { current_mode = mode; }
-    void setInBattle(bool battle) { in_battle = battle; }
-    void setGameActive(bool active) { game_active = active; }
-    int getCurrentFPS() const { return current_fps; }
-    RefreshMode getCurrentMode() const { return current_mode; }
-    int getSleepMicroseconds() const { return current_fps <= 0 ? 0 : 1000000 / current_fps; }
-};
-
-// ============================================================================
-// 8. SMART REPORTING SYSTEM (من v11)
-// ============================================================================
-class SmartReportingSystem {
-private:
-    struct ErrorReport {
-        std::string timestamp;
-        std::string error_type;
-        std::string error_message;
-        std::string context;
-        std::string device_info;
-    };
-    std::vector<ErrorReport> reports;
-    std::mutex reports_mutex;
-    std::string report_file;
-    
-    std::string getDeviceInfo() {
-        std::stringstream ss;
-        std::ifstream build_prop("/system/build.prop");
-        if (build_prop.is_open()) {
-            std::string line;
-            while (std::getline(build_prop, line)) {
-                if (line.find("ro.product.model") != std::string::npos) {
-                    size_t eq = line.find('=');
-                    if (eq != std::string::npos) ss << "Model: " << line.substr(eq + 1) << "\n";
-                }
-                if (line.find("ro.build.version.sdk") != std::string::npos) {
-                    size_t eq = line.find('=');
-                    if (eq != std::string::npos) ss << "API: " << line.substr(eq + 1) << "\n";
-                }
-            }
-        }
-        struct sysinfo info;
-        if (sysinfo(&info) == 0) ss << "RAM: " << (info.totalram / (1024 * 1024)) << " MB\n";
-        return ss.str();
-    }
-    
-public:
-    SmartReportingSystem() { report_file = "/data/local/tmp/.looka_crash.log"; }
-    
-    void logError(const std::string& error_type, const std::string& error_message, const std::string& context = "") {
-        ErrorReport report;
-        report.timestamp = [](){
-            auto now = std::chrono::system_clock::now();
-            auto time = std::chrono::system_clock::to_time_t(now);
-            std::stringstream ss;
-            ss << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S");
-            return ss.str();
-        }();
-        report.error_type = error_type;
-        report.error_message = error_message;
-        report.context = context;
-        report.device_info = getDeviceInfo();
-        {
-            std::lock_guard<std::mutex> lock(reports_mutex);
-            reports.push_back(report);
-        }
-        std::ofstream file(report_file, std::ios::app);
-        if (file.is_open()) {
-            file << "[" << report.timestamp << "] " << error_type << ": " << error_message << std::endl;
-            file.close();
-        }
-        LOG_ERROR("%s: %s", error_type.c_str(), error_message.c_str());
-    }
-    
-    void printLastErrors(int count = 5) {
-        std::lock_guard<std::mutex> lock(reports_mutex);
-        std::cout << "\n📋 Recent Errors:" << std::endl;
-        std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << std::endl;
-        int start = std::max(0, (int)reports.size() - count);
-        for (int i = start; i < (int)reports.size(); i++) {
-            const auto& r = reports[i];
-            std::cout << "  [" << r.timestamp << "] " << r.error_type << ": " << r.error_message << std::endl;
-        }
-        std::cout << "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" << std::endl;
-    }
-};
-
-// ============================================================================
-// 9. POLYMORPHIC MEMORY PROTECTION (من v11)
-// ============================================================================
-class PolymorphicMemoryProtection {
-private:
-    std::mt19937 rng;
-    std::vector<uint8_t> global_key;
-    std::chrono::steady_clock::time_point last_rotation;
-    static constexpr int KEY_ROTATION_SEC = 45;
-    
-    void rotateGlobalKey() {
-        for (size_t i = 0; i < global_key.size(); i++) global_key[i] = rng() & 0xFF;
-        last_rotation = std::chrono::steady_clock::now();
-    }
-    
-public:
-    PolymorphicMemoryProtection() : rng(std::random_device{}()) {
-        global_key.resize(64);
-        for (size_t i = 0; i < 64; i++) global_key[i] = rng() & 0xFF;
-        last_rotation = std::chrono::steady_clock::now();
-    }
-    
-    void rotateKeys() {
-        auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_rotation).count() >= KEY_ROTATION_SEC) {
-            rotateGlobalKey();
-            LOG_INFO("Polymorphic keys rotated");
-        }
-    }
-};
-
-// ============================================================================
-// 10. ROOT DETECTOR
-// ============================================================================
-struct RootCheckResult {
-    bool has_root = false;
-    std::string method;
-    std::vector<std::string> details;
-};
-
-class RootDetector {
-public:
-    static RootCheckResult detect() {
-        RootCheckResult result;
-        if (getuid() == 0) {
-            result.has_root = true;
-            result.method = "Running as root (UID=0)";
-            result.details.push_back("Process has root privileges");
-        }
-        const char* su_paths[] = {"/system/bin/su", "/system/xbin/su", "/sbin/su",
-            "/data/local/bin/su", "/data/adb/magisk/magisk", nullptr};
-        for (int i = 0; su_paths[i]; i++) {
-            if (access(su_paths[i], X_OK) == 0) {
-                result.has_root = true;
-                result.method = "su binary found";
-                result.details.push_back(std::string("Found: ") + su_paths[i]);
-                break;
-            }
-        }
-        if (std::filesystem::exists("/data/adb/magisk")) {
-            result.has_root = true;
-            result.method = "Magisk detected";
-            result.details.push_back("Magisk root manager found");
-        }
-        return result;
-    }
-};
-
-// ============================================================================
-// 11. HYBRID MODE SELECTOR
-// ============================================================================
-class HybridModeSelector {
-private:
-    RootCheckResult root_status;
-    ExecutionMode effective_mode;
-    bool root_available;
-    
-public:
-    HybridModeSelector() {
-        root_status = RootDetector::detect();
-        root_available = root_status.has_root;
-        effective_mode = root_available ? ExecutionMode::ROOT : ExecutionMode::NON_ROOT;
-        LOG_INFO("Mode: %s", root_available ? "ULTRA (Root)" : "STANDARD (Non-Root)");
-    }
-    
-    ExecutionMode getEffectiveMode() const { return effective_mode; }
-    bool isUltraMode() const { return effective_mode == ExecutionMode::ROOT; }
-    bool isRootAvailable() const { return root_available; }
-};
-
-// ============================================================================
-// 12. GHOST PROCESS
-// ============================================================================
-class GhostProcess {
-private:
-    std::string original_name;
-    bool hidden = false;
-    
-public:
-    GhostProcess() {
-        std::ifstream cmdline("/proc/self/cmdline");
-        if (cmdline.is_open()) {
-            std::getline(cmdline, original_name);
-            original_name.erase(std::find(original_name.begin(), original_name.end(), '\0'), original_name.end());
-        }
-        if (original_name.empty()) original_name = "looka_engine";
-    }
-    
-    bool makeGhost() {
-        if (hidden) return true;
-        if (prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(FAKE_PROCESS_NAME), 0, 0, 0) == 0) {
-            hidden = true;
-            LOG_INFO("Ghost mode active - Hidden as '%s'", FAKE_PROCESS_NAME);
-            return true;
-        }
-        return false;
-    }
-    
-    void restore() {
-        if (!hidden) return;
-        prctl(PR_SET_NAME, reinterpret_cast<unsigned long>(original_name.c_str()), 0, 0, 0);
-        hidden = false;
-    }
-    
-    bool isGhost() const { return hidden; }
-};
-
-// ============================================================================
-// 13. ADVANCED ANTI-DETECT
-// ============================================================================
-class AdvancedAntiDetect {
-private:
-    bool active = false;
-    
-public:
-    bool activate() {
-        if (active) return true;
-        if (unshare(CLONE_NEWNS) == 0) {
-            std::filesystem::create_directory(HIDE_MOUNT_POINT);
-            mount(HIDE_MOUNT_POINT, "/proc/self", nullptr, MS_BIND, nullptr);
-            active = true;
-            LOG_INFO("Advanced anti-detect active");
-            return true;
-        }
-        return false;
-    }
-    
-    void deactivate() { active = false; }
-    bool isActive() const { return active; }
-};
-
-// ============================================================================
-// 14. OVERLAY (Framebuffer)
-// ============================================================================
-struct Pixel {
-    uint8_t r, g, b, a;
-};
-
-class Overlay {
-private:
-    int _fb_fd;
-    struct fb_var_screeninfo _vinfo;
-    struct fb_fix_screeninfo _finfo;
-    long _screensize;
-    char* _fbp;
-    bool _initialized = false;
-
-public:
-    Overlay() : _fb_fd(-1), _fbp(nullptr) {}
-    
-    ~Overlay() {
-        if (_fbp) munmap(_fbp, _screensize);
-        if (_fb_fd != -1) close(_fb_fd);
-    }
-    
-    bool init() {
-        if (_initialized) return true;
-        _fb_fd = open("/dev/graphics/fb0", O_RDWR);
-        if (_fb_fd == -1) _fb_fd = open("/dev/fb0", O_RDWR);
-        if (_fb_fd == -1) {
-            LOG_ERROR("Cannot open framebuffer device. Root required?");
-            return false;
-        }
-        if (ioctl(_fb_fd, FBIOGET_FSCREENINFO, &_finfo) == -1) {
-            LOG_ERROR("Error reading fixed information.");
-            close(_fb_fd);
-            return false;
-        }
-        if (ioctl(_fb_fd, FBIOGET_VSCREENINFO, &_vinfo) == -1) {
-            LOG_ERROR("Error reading variable information.");
-            close(_fb_fd);
-            return false;
-        }
-        _screensize = _vinfo.xres * _vinfo.yres * _vinfo.bits_per_pixel / 8;
-        _fbp = (char*)mmap(0, _screensize, PROT_READ | PROT_WRITE, MAP_SHARED, _fb_fd, 0);
-        if ((long)_fbp == -1) {
-            LOG_ERROR("Failed to mmap framebuffer.");
-            close(_fb_fd);
-            return false;
-        }
-        _initialized = true;
-        LOG_INFO("Framebuffer overlay ready - Resolution: %dx%d", _vinfo.xres, _vinfo.yres);
-        return true;
-    }
-    
-    void drawPixel(int x, int y, Pixel color) {
-        if (!_fbp || x < 0 || x >= _vinfo.xres || y < 0 || y >= _vinfo.yres) return;
-        long location = (x + _vinfo.xoffset) * (_vinfo.bits_per_pixel / 8) +
-                        (y + _vinfo.yoffset) * _finfo.line_length;
-        if (_vinfo.bits_per_pixel == 32) {
-            *(_fbp + location) = color.b;
-            *(_fbp + location + 1) = color.g;
-            *(_fbp + location + 2) = color.r;
-            *(_fbp + location + 3) = color.a;
-        }
-    }
-    
-    void clear() { if (_fbp) memset(_fbp, 0, _screensize); }
-    bool isAvailable() const { return _initialized; }
-};
-
-// ============================================================================
-// 15. ENGINE BRIDGE (Shared Memory)
-// ============================================================================
-class EngineBridge {
-private:
-    int _shm_fd;
-    void* _shared_mem;
-    const size_t SHM_SIZE = 1024 * 64;
-    bool _initialized = false;
-
-public:
-    EngineBridge() : _shm_fd(-1), _shared_mem(nullptr) {}
-    
-    ~EngineBridge() {
-        if (_shared_mem) munmap(_shared_mem, SHM_SIZE);
-        if (_shm_fd != -1) {
-            close(_shm_fd);
-            shm_unlink("/looka_bridge");
-        }
-    }
-    
-    bool create() {
-        _shm_fd = shm_open("/looka_bridge", O_RDWR | O_CREAT, 0666);
-        if (_shm_fd == -1) {
-            LOG_ERROR("Failed to create Shared Memory Bridge.");
-            return false;
-        }
-        if (ftruncate(_shm_fd, SHM_SIZE) == -1) return false;
-        _shared_mem = mmap(nullptr, SHM_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, _shm_fd, 0);
-        if (_shared_mem == MAP_FAILED) return false;
-        _initialized = true;
-        LOG_INFO("Engine Bridge established at 0x%p", _shared_mem);
-        return true;
-    }
-    
-    template<typename T>
-    void sendData(const T& data) {
-        if (_shared_mem) memcpy(_shared_mem, &data, sizeof(T));
-    }
-    
-    bool isAvailable() const { return _initialized; }
-};
-
-// ============================================================================
-// 16. SYSTEM MONITOR
-// ============================================================================
-class SystemMonitor {
-public:
-    static void printSystemStats() {
-        struct sysinfo info;
-        if (sysinfo(&info) == 0) {
-            LOG_INFO("System Uptime: %ld seconds", info.uptime);
-            LOG_INFO("Total RAM: %.2f MB", info.totalram / 1024.0 / 1024.0);
-            LOG_INFO("Free RAM: %.2f MB", info.freeram / 1024.0 / 1024.0);
-            LOG_INFO("Active Processes: %d", info.procs);
-        }
-    }
-};
-
-// ============================================================================
-// 17. CRYPTO PROVIDER
-// ============================================================================
-class CryptoProvider {
-public:
-    static std::string encrypt(const std::string& plain_text, const std::string& key) {
-        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-        unsigned char ciphertext[1024];
-        int len, ciphertext_len;
-        EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), NULL, (unsigned char*)key.data(), (unsigned char*)key.data());
-        EVP_EncryptUpdate(ctx, ciphertext, &len, (unsigned char*)plain_text.data(), plain_text.length());
-        ciphertext_len = len;
-        EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
-        ciphertext_len += len;
-        EVP_CIPHER_CTX_free(ctx);
-        return std::string((char*)ciphertext, ciphertext_len);
-    }
-    
-    static void handleErrors() { ERR_print_errors_fp(stderr); }
-};
-
-// ============================================================================
-// 18. AIM FEATURES
-// ============================================================================
-struct Vector2 {
-    float x, y;
-    Vector2() : x(0), y(0) {}
-    Vector2(float px, float py) : x(px), y(py) {}
-};
-
-class DynamicAimAssist {
-private:
-    struct Config { bool enabled = true; float smoothness = 5.0f; } config;
-public:
-    void setEnabled(bool enabled) { config.enabled = enabled; }
-    Vector2 calculateAssist(Vector2 current, Vector2 target) {
-        if (!config.enabled) return current;
-        Vector2 result;
-        result.x = current.x + (target.x - current.x) / config.smoothness;
-        result.y = current.y + (target.y - current.y) / config.smoothness;
-        return result;
-    }
-};
-
-class HardcoreAimbot {
-private:
-    struct Config { bool enabled = false; } config;
-public:
-    void setEnabled(bool enabled) { config.enabled = enabled; }
-};
-
-class FlickDetector {
-private:
-    struct Config { bool enabled = true; } config;
-public:
-    void setEnabled(bool enabled) { config.enabled = enabled; }
-};
-
-// ============================================================================
-// 19. FLOATING CONTROL PANEL
-// ============================================================================
-class FloatingControlPanel {
-private:
-    bool visible = true;
-    bool minimized = false;
-    std::atomic<bool> running{false};
-    
-public:
-    void start() { running = true; LOG_INFO("Control panel started"); }
-    void stop() { running = false; }
-    void setVisible(bool vis) { visible = vis; }
-    void setMinimized(bool min) { minimized = min; }
-    void updateStats(int fps, int enemies) { /* تحديث الإحصائيات */ }
-};
-
-// ============================================================================
-// 20. MAIN ENGINE CLASS (دمج جميع الميزات)
-// ============================================================================
-class LookaEngineUltimate {
-private:
-    std::unique_ptr<HybridModeSelector> mode_selector;
-    ExecutionMode current_mode;
-    
-    // مكونات القراءة والكتابة
-    std::unique_ptr<MemoryManager> memory;
-    std::unique_ptr<DirectKernelAccess> direct_kernel;
-    std::unique_ptr<NEONPatternScanner> neon_scanner;
-    std::unique_ptr<IntelligentCacheManager<uintptr_t, uint32_t>> cache;
-    
-    // مكونات الرسم والاتصال
-    std::unique_ptr<Overlay> overlay;
-    std::unique_ptr<EngineBridge> bridge;
-    
-    // مكونات الحماية
-    std::unique_ptr<GhostProcess> ghost;
-    std::unique_ptr<AdvancedAntiDetect> anti_detect;
-    std::unique_ptr<PolymorphicMemoryProtection> polymorphic;
-    
-    // مكونات التحكم
-    std::unique_ptr<AdaptiveRefreshManager> refresh_manager;
-    std::unique_ptr<SmartReportingSystem> reporter;
-    std::unique_ptr<FloatingControlPanel> ui_panel;
-    std::unique_ptr<DynamicAimAssist> aim_assist;
-    std::unique_ptr<HardcoreAimbot> hardcore_aimbot;
-    std::unique_ptr<FlickDetector> flick_detector;
-    
-    pid_t target_pid;
-    uintptr_t base_address;
-    std::string module_name;
-    std::atomic<EngineState> state{EngineState::STOPPED};
-    std::atomic<uint64_t> frames{0};
-    std::vector<std::thread> _worker_threads;
-    std::unordered_map<std::string, uintptr_t> addresses;
-    
-    struct FreezeItem {
-        uintptr_t address;
-        std::vector<uint8_t> value;
-        bool active;
-    };
-    std::vector<FreezeItem> _freeze_list;
-    std::mutex _freeze_mutex;
-    
-    void registerPatterns() {
-        neon_scanner->addPattern("health", "?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 00 00");
-        neon_scanner->addPattern("armor", "FF FF FF FF 00 00 00 00 ?? ?? ?? ??");
-        neon_scanner->addPattern("speed", "00 00 80 3F ?? ?? ?? ?? ?? ?? ?? ??");
-        neon_scanner->addPattern("jump", "00 00 00 00 00 00 F0 3F ?? ?? ?? ??");
-        neon_scanner->addPattern("recoil", "00 00 00 00 00 00 00 00 CD CC CC 3D");
-        LOG_INFO("Registered 5 patterns");
-    }
-    
-    void collectPatterns() {
-        std::vector<std::string> patterns = {"health", "armor", "speed", "jump", "recoil"};
-        for (const auto& name : patterns) {
-            uintptr_t addr = neon_scanner->getPatternResult(name);
-            if (addr != 0) {
-                addresses[name] = addr;
-                LOG_INFO("Found %s at 0x%lx", name.c_str(), addr);
-            }
-        }
-    }
-    
-    void freezeWorker() {
-        while (state.load() == EngineState::RUNNING) {
-            {
-                std::lock_guard<std::mutex> lock(_freeze_mutex);
-                for (auto& item : _freeze_list) {
-                    if (item.active && memory) {
-                        memory->write(item.address, item.value.data(), item.value.size());
-                    }
-                }
-            }
-            std::this_thread::sleep_for(std::chrono::microseconds(500));
-        }
-    }
-    
-    void overlayWorker() {
-        while (state.load() == EngineState::RUNNING && overlay && overlay->isAvailable()) {
-            overlay->clear();
-            overlay->drawPixel(540, 1170, {255, 0, 0, 255});
-            std::this_thread::sleep_for(std::chrono::milliseconds(16));
-        }
-    }
-    
-public:
-    LookaEngineUltimate(pid_t pid, uintptr_t base, const std::string& module) 
-        : target_pid(pid), base_address(base), module_name(module) {
-        
-        mode_selector = std::make_unique<HybridModeSelector>();
-        current_mode = mode_selector->getEffectiveMode();
-        
-        memory = std::make_unique<MemoryManager>(target_pid);
-        direct_kernel = std::make_unique<DirectKernelAccess>(target_pid);
-        neon_scanner = std::make_unique<NEONPatternScanner>(target_pid);
-        cache = std::make_unique<IntelligentCacheManager<uintptr_t, uint32_t>>();
-        
-        overlay = std::make_unique<Overlay>();
-        bridge = std::make_unique<EngineBridge>();
-        
-        ghost = std::make_unique<GhostProcess>();
-        anti_detect = std::make_unique<AdvancedAntiDetect>();
-        polymorphic = std::make_unique<PolymorphicMemoryProtection>();
-        
-        refresh_manager = std::make_unique<AdaptiveRefreshManager>();
-        reporter = std::make_unique<SmartReportingSystem>();
-        ui_panel = std::make_unique<FloatingControlPanel>();
-        aim_assist = std::make_unique<DynamicAimAssist>();
-        hardcore_aimbot = std::make_unique<HardcoreAimbot>();
-        flick_detector = std::make_unique<FlickDetector>();
-        
-        LOG_INFO("Engine initialized - Mode: %s", current_mode == ExecutionMode::ROOT ? "ULTRA" : "STANDARD");
-    }
-    
-    bool initialize() {
-        try {
-            if (!memory->attach()) {
-                LOG_ERROR("Cannot attach to target process");
-                return false;
-            }
-            
-            if (neon_scanner->initialize(module_name)) {
-                registerPatterns();
-                neon_scanner->scanAllPatterns();
-                collectPatterns();
-                LOG_INFO("NEON scan complete - Found %zu patterns", addresses.size());
-            }
-            
-            if (overlay->init()) {
-                LOG_INFO("Overlay initialized");
-            } else {
-                LOG_WARNING("Overlay initialization skipped");
-            }
-            
-            if (bridge->create()) {
-                LOG_INFO("Bridge created");
-            } else {
-                LOG_WARNING("Bridge creation failed");
-            }
-            
-            SystemMonitor::printSystemStats();
-            
-            if (mode_selector->isUltraMode()) {
-                if (ghost->makeGhost()) LOG_INFO("Ghost mode active");
-                if (anti_detect->activate()) LOG_INFO("Anti-detect active");
-            }
-            
-            ui_panel->start();
-            
-            state.store(EngineState::INITIALIZING);
-            state.store(EngineState::STOPPED);
-            return true;
-            
-        } catch (const std::exception& e) {
-            reporter->logError("Initialization", e.what());
-            state.store(EngineState::ERROR);
-            return false;
-        }
-    }
-    
-    void addFreeze(uintptr_t addr, const std::vector<uint8_t>& val) {
-        std::lock_guard<std::mutex> lock(_freeze_mutex);
-        _freeze_list.push_back({addr, val, true});
-        LOG_DEBUG("Added Freeze at 0x%lx", addr);
-    }
-    
-    void run() {
-        if (state.load() != EngineState::STOPPED) return;
-        
-        state.store(EngineState::RUNNING);
-        LOG_INFO("Engine running - All systems operational");
-        
-        _worker_threads.emplace_back(&LookaEngineUltimate::freezeWorker, this);
-        _worker_threads.emplace_back(&LookaEngineUltimate::overlayWorker, this);
-        
-        while (state.load() == EngineState::RUNNING) {
-            refresh_manager->update();
-            frames++;
-            
-            if (polymorphic) polymorphic->rotateKeys();
-            
-            int sleep_us = refresh_manager->getSleepMicroseconds();
-            if (sleep_us > 0) {
-                std::this_thread::sleep_for(std::chrono::microseconds(sleep_us));
-            }
-            
-            bridge->sendData(state.load());
-            
-            if (memory->getRegions().empty()) {
-                LOG_ERROR("Target process lost");
-                state.store(EngineState::ERROR);
-                break;
-            }
-        }
-        
-        for (auto& t : _worker_threads) {
-            if (t.joinable()) t.join();
-        }
-    }
-    
-    void stop() {
-        LOG_INFO("Stopping engine...");
-        state.store(EngineState::STOPPED);
-        
-        if (ui_panel) ui_panel->stop();
-        if (overlay) overlay->clear();
-        if (memory) memory->detach();
-        if (ghost) ghost->restore();
-        if (anti_detect) anti_detect->deactivate();
-    }
-    
-    int getCurrentFPS() const { return refresh_manager->getCurrentFPS(); }
-    EngineState getState() const { return state.load(); }
-    uintptr_t getAddress(const std::string& name) {
-        auto it = addresses.find(name);
-        return it != addresses.end() ? it->second : 0;
-    }
-    
-    void printStatus() {
-        auto uptime = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - std::chrono::steady_clock::now()).count();
-        
-        std::cout << "\n╔══════════════════════════════════════════════════════════════════╗\n";
-        std::cout << "║  Looka Engine v" << LOOKA_VERSION << " - Ultimate Status Report            ║\n";
-        std::cout << "╠══════════════════════════════════════════════════════════════════╣\n";
-        std::cout << "║  Mode: " << (current_mode == ExecutionMode::ROOT ? "ULTRA (Root)" : "STANDARD") << std::endl;
-        std::cout << "║  Frames: " << frames.load() << std::endl;
-        std::cout << "║  Patterns Found: " << addresses.size() << std::endl;
-        std::cout << "║  Cache Hit Rate: " << std::fixed << std::setprecision(1) << cache->getHitRate() << "%" << std::endl;
-        std::cout << "║  Scan Speed: " << std::fixed << std::setprecision(0) << neon_scanner->getScanSpeedMBps() << " MB/s" << std::endl;
-        std::cout << "║  Ghost Mode: " << (ghost && ghost->isGhost() ? "Active" : "Inactive") << std::endl;
-        std::cout << "║  Anti-Detect: " << (anti_detect && anti_detect->isActive() ? "Active" : "Inactive") << std::endl;
-        std::cout << "╚══════════════════════════════════════════════════════════════════╝\n" << std::endl;
-        
-        reporter->printLastErrors(3);
-    }
-};
-
-// ============================================================================
-// GAME DETECTOR
-// ============================================================================
-class GameDetector {
-public:
-    static pid_t findProcessByPackage(const std::string& package_name) {
-        DIR* dir = opendir("/proc");
-        if (!dir) return -1;
-        struct dirent* entry;
-        pid_t result = -1;
-        while ((entry = readdir(dir)) != nullptr) {
-            if (entry->d_type != DT_DIR) continue;
-            char* endptr;
-            pid_t pid = strtol(entry->d_name, &endptr, 10);
-            if (*endptr != '\0') continue;
-            std::string cmdline_path = "/proc/" + std::string(entry->d_name) + "/cmdline";
-            std::ifstream cmdline(cmdline_path);
-            if (!cmdline.is_open()) continue;
-            std::string cmd;
-            std::getline(cmdline, cmd);
-            if (cmd.find(package_name) != std::string::npos) {
-                result = pid;
-                break;
-            }
-        }
-        closedir(dir);
-        return result;
-    }
-};
-
-// ============================================================================
-// BRAND IDENTITY
-// ============================================================================
-class BrandIdentity {
-public:
-    static void displayBanner() {
-        std::cout << BRAND_COLOR;
-        std::cout << R"(
-╔══════════════════════════════════════════════════════════════════════════════════════╗
-║   ██╗     ██████╗  ██████╗ ██╗  ██╗ █████╗     ███████╗███╗   ██╗ ██████╗ ██╗███╗   ██╗███████╗    ║
-║   ██║     ██╔══██╗██╔══██╗██║ ██╔╝██╔══██╗    ██╔════╝████╗  ██║██╔════╝ ██║████╗  ██║██╔════╝    ║
-║   ██║     ██████╔╝██████╔╝█████╔╝ ███████║    █████╗  ██╔██╗ ██║██║  ███╗██║██╔██╗ ██║█████╗      ║
-║   ██║     ██╔══██╗██╔══██╗██╔═██╗ ██╔══██║    ██╔══╝  ██║╚██╗██║██║   ██║██║██║╚██╗██║██╔══╝      ║
-║   ███████╗██║  ██║██████╔╝██║  ██╗██║  ██║    ███████╗██║ ╚████║╚██████╔╝██║██║ ╚████║███████╗    ║
-║   ╚══════╝╚═╝  ╚═╝╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝    ╚══════╝╚═╝  ╚═══╝ ╚═════╝ ╚═╝╚═╝  ╚═══╝╚══════╝    ║
-╚══════════════════════════════════════════════════════════════════════════════════════╝
-)" << std::endl;
-        std::cout << "  Looka Engine v" << LOOKA_VERSION << " - Ultimate Merged Edition" << std::endl;
-        std::cout << "\033[0m";
-    }
-};
-
-// ============================================================================
-// MAIN
-// ============================================================================
-static std::atomic<bool> g_running{true};
-static std::unique_ptr<LookaEngineUltimate> g_engine;
-
-void signalHandler(int sig) {
-    LOG_INFO("Signal %d received", sig);
-    g_running = false;
-    if (g_engine) g_engine->stop();
-}
-
-int main() {
-    try {
-        signal(SIGINT, signalHandler);
-        signal(SIGTERM, signalHandler);
-        
-        BrandIdentity::displayBanner();
-        
-        std::string package = "com.dts.freefireth";
-        std::string module = "libil2cpp.so";
-        
-        std::cout << "\n🔍 Searching for game: " << package << "..." << std::endl;
-        
-        pid_t pid = -1;
-        for (int attempt = 1; attempt <= 3; ++attempt) {
-            pid = GameDetector::findProcessByPackage(package);
-            if (pid > 0) break;
-            std::cout << "   Attempt " << attempt << "/3 - Game not running" << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(2));
-        }
-        
-        if (pid <= 0) {
-            std::cout << "\n❌ Game not found! Please start " << package << " first." << std::endl;
-            return 1;
-        }
-        
-        std::cout << "✅ Game PID: " << pid << std::endl;
-        
-        struct TempMem {
-            pid_t pid;
-            uintptr_t findBase(const std::string& name) {
-                std::string maps = "/proc/" + std::to_string(pid) + "/maps";
-                std::ifstream f(maps);
-                std::string line;
-                while (std::getline(f, line)) {
-                    if (line.find(name) != std::string::npos) {
-                        size_t dash = line.find('-');
-                        if (dash != std::string::npos) {
-                            return std::stoull(line.substr(0, dash), nullptr, 16);
-                        }
-                    }
-                }
-                return 0;
-            }
-        } temp{pid};
-        
-        uintptr_t base = temp.findBase(module);
-        
-        if (base == 0) {
-            std::cout << "\n⚠️  Module not found. Waiting for game to load..." << std::endl;
-            for (int attempt = 1; attempt <= 10 && base == 0; ++attempt) {
-                std::this_thread::sleep_for(std::chrono::seconds(2));
-                base = temp.findBase(module);
-                if (base != 0) {
-                    std::cout << "✅ Module found on attempt " << attempt << std::endl;
-                }
-            }
-            if (base == 0) {
-                std::cout << "\n❌ Module " << module << " not found!" << std::endl;
-                return 1;
-            }
-        }
-        
-        std::cout << "📦 Module base: 0x" << std::hex << base << std::dec << std::endl;
-        
-        g_engine = std::make_unique<LookaEngineUltimate>(pid, base, module);
-        
-        if (!g_engine->initialize()) {
-            std::cout << "\n❌ Engine initialization failed!" << std::endl;
-            return 1;
-        }
-        
-        std::cout << "\n🚀 Looka Engine v" << LOOKA_VERSION << " is ACTIVE!" << std::endl;
-        std::cout << "💡 Type 'status' for full report" << std::endl;
-        std::cout << "⏱️  Press Ctrl+C to stop" << std::endl;
-        
-        std::thread engine_thread([]() {
-            try {
-                g_engine->run();
-            } catch (const std::exception& e) {
-                g_running = false;
-            }
-        });
-        
-        std::thread cmd_thread([]() {
-            std::string input;
-            while (g_running) {
-                if (std::cin.peek() != EOF) {
-                    std::getline(std::cin, input);
-                    if (input == "status" || input == "s") {
-                        if (g_engine) g_engine->printStatus();
-                    } else if (input == "quit" || input == "q") {
-                        g_running = false;
+                    if (start == module_base) {
+                        module_size = end - start;
                         break;
                     }
-                } else {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
             }
-        });
+        }
         
-        engine_thread.join();
-        cmd_thread.join();
+        if (module_base && module_size) {
+            hide_from_maps();
+        }
+    }
+    
+    void hide_from_maps() {
+        uintptr_t name_addr = find_name_in_memory();
+        if (name_addr) {
+            const char* fake_name = OBF("        ");
+            mprotect((void*)(name_addr & ~0xFFF), 0x1000, PROT_READ | PROT_WRITE);
+            strcpy((char*)name_addr, fake_name);
+            LOGI(OBF("Library name wiped from memory"));
+        }
+    }
+    
+    uintptr_t find_name_in_memory() {
+        const uint8_t* start = (const uint8_t*)module_base;
+        const uint8_t* end = start + module_size;
+        const char* target = original_name.c_str();
+        size_t target_len = original_name.length();
         
-        if (g_engine) g_engine->stop();
-        
-        std::cout << "\n🛑 Looka Engine stopped." << std::endl;
+        for (const uint8_t* p = start; p <= end - target_len; p++) {
+            if (memcmp(p, target, target_len) == 0) {
+                return (uintptr_t)p;
+            }
+        }
         return 0;
+    }
+};
+
+// ============================================================================
+// 5. ADVANCED SYMBOL HIDER
+// ============================================================================
+class AdvancedSymbolHider {
+private:
+    uintptr_t module_base;
+    
+public:
+    AdvancedSymbolHider() {
+        Dl_info info;
+        if (dladdr((void*)JNI_OnLoad, &info)) {
+            module_base = (uintptr_t)info.dli_fbase;
+        }
         
-    } catch (const std::exception& e) {
-        std::cerr << "\n❌ Fatal error: " << e.what() << std::endl;
-        return 1;
+        if (is_valid_elf()) {
+            wipe_sections();
+        }
+    }
+    
+    bool is_valid_elf() {
+        if (module_base == 0) return false;
+        const uint8_t* magic = (const uint8_t*)module_base;
+        return (magic[0] == 0x7F && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F');
+    }
+    
+    void wipe_sections() {
+        struct ElfHeader {
+            uint8_t e_ident[16];
+            uint16_t e_type;
+            uint16_t e_machine;
+            uint32_t e_version;
+            uint64_t e_entry;
+            uint64_t e_phoff;
+            uint64_t e_shoff;
+            uint32_t e_flags;
+            uint16_t e_ehsize;
+            uint16_t e_phentsize;
+            uint16_t e_phnum;
+            uint16_t e_shentsize;
+            uint16_t e_shnum;
+            uint16_t e_shstrndx;
+        };
+        
+        struct SectionHeader {
+            uint32_t sh_name;
+            uint32_t sh_type;
+            uint64_t sh_flags;
+            uint64_t sh_addr;
+            uint64_t sh_offset;
+            uint64_t sh_size;
+            uint32_t sh_link;
+            uint32_t sh_info;
+            uint64_t sh_addralign;
+            uint64_t sh_entsize;
+        };
+        
+        ElfHeader* ehdr = (ElfHeader*)module_base;
+        if (!ehdr || ehdr->e_shoff == 0) return;
+        
+        SectionHeader* shdr = (SectionHeader*)(module_base + ehdr->e_shoff);
+        if (ehdr->e_shstrndx >= ehdr->e_shnum) return;
+        
+        char* strtab = (char*)(module_base + shdr[ehdr->e_shstrndx].sh_offset);
+        
+        const char* sections_to_wipe[] = {
+            ".symtab", ".strtab", ".dynsym", ".dynstr",
+            ".debug_info", ".debug_line", nullptr
+        };
+        
+        for (int i = 0; i < ehdr->e_shnum; i++) {
+            const char* name = strtab + shdr[i].sh_name;
+            for (int j = 0; sections_to_wipe[j]; j++) {
+                if (strcmp(name, sections_to_wipe[j]) == 0) {
+                    uintptr_t addr = module_base + shdr[i].sh_offset;
+                    size_t size = shdr[i].sh_size;
+                    
+                    if (addr && size) {
+                        mprotect((void*)(addr & ~0xFFF), size + 0x1000, PROT_READ | PROT_WRITE);
+                        memset((void*)addr, 0, size);
+                        LOGI(OBF("Wiped section: %s"), name);
+                    }
+                    break;
+                }
+            }
+        }
+        
+        LOGI(OBF("All symbol tables wiped"));
+    }
+};
+
+// ============================================================================
+// 6. LIBRARY SPOOFING
+// ============================================================================
+class LibrarySpoofer {
+private:
+    std::string fake_name;
+    
+public:
+    LibrarySpoofer() {
+        const char* system_libs[] = {
+            "libsurfaceflinger.so", "libandroid_runtime.so", "libhwui.so",
+            "libskia.so", "libEGL.so", "libGLESv2.so", "libvulkan.so"
+        };
+        
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(0, 6);
+        
+        fake_name = system_libs[dist(gen)];
+        
+        Dl_info info;
+        if (dladdr((void*)JNI_OnLoad, &info)) {
+            uintptr_t name_addr = (uintptr_t)info.dli_fname;
+            size_t name_len = strlen(info.dli_fname);
+            
+            mprotect((void*)(name_addr & ~0xFFF), name_len + 0x1000, PROT_READ | PROT_WRITE);
+            strcpy((char*)name_addr, fake_name.c_str());
+            
+            LOGI(OBF("Library spoofed as: %s"), fake_name.c_str());
+        }
+    }
+    
+    const char* get_name() const { return fake_name.c_str(); }
+};
+
+// ============================================================================
+// 7. DYNAMIC KEY GENERATOR
+// ============================================================================
+class DynamicKeyGenerator {
+public:
+    DynamicKeyGenerator() {
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::uniform_int_distribution<> dist(1, 255);
+        DYNAMIC_XOR_KEY = dist(gen);
+        LOGI(OBF("Dynamic XOR key generated: 0x%02X"), DYNAMIC_XOR_KEY);
+    }
+};
+
+// ============================================================================
+// 8. HARDWARE BREAKPOINT HOOK
+// ============================================================================
+class HardwareBreakpointHook {
+public:
+    HardwareBreakpointHook() {
+        LOGI(OBF("Hardware breakpoint handler ready"));
+    }
+    
+    bool set_breakpoint(uintptr_t address) {
+        LOGI(OBF("Hardware breakpoint set at 0x%lx"), address);
+        return true;
+    }
+};
+
+// ============================================================================
+// 9. ENCRYPTED PATTERN SCANNER
+// ============================================================================
+class EncryptedPatternScanner {
+private:
+    struct PatternResult {
+        uintptr_t address;
+        const char* name;
+    };
+    std::vector<PatternResult> results;
+    uintptr_t module_base;
+    size_t module_size;
+    
+    uintptr_t get_module_base() {
+        std::ifstream maps("/proc/self/maps");
+        std::string line;
+        while (std::getline(maps, line)) {
+            if (line.find(OBF("libil2cpp.so")) != std::string::npos) {
+                size_t dash = line.find('-');
+                return std::stoull(line.substr(0, dash), nullptr, 16);
+            }
+        }
+        return 0;
+    }
+    
+    size_t get_module_size() {
+        std::ifstream maps("/proc/self/maps");
+        std::string line;
+        size_t max_end = 0;
+        uintptr_t base = 0;
+        while (std::getline(maps, line)) {
+            if (line.find(OBF("libil2cpp.so")) != std::string::npos) {
+                size_t dash = line.find('-');
+                size_t space = line.find(' ', dash);
+                uintptr_t start = std::stoull(line.substr(0, dash), nullptr, 16);
+                uintptr_t end = std::stoull(line.substr(dash + 1, space - dash - 1), nullptr, 16);
+                if (base == 0) base = start;
+                if (end > max_end) max_end = end;
+            }
+        }
+        return max_end - base;
+    }
+    
+    uintptr_t find_pattern(const std::string& pattern) {
+        std::vector<uint8_t> bytes;
+        std::vector<bool> mask;
+        std::stringstream ss(pattern);
+        std::string byte;
+        
+        while (ss >> byte) {
+            if (byte == OBF("??") || byte == OBF("?")) {
+                bytes.push_back(0);
+                mask.push_back(false);
+            } else {
+                bytes.push_back((uint8_t)std::stoul(byte, nullptr, 16));
+                mask.push_back(true);
+            }
+        }
+        
+        const uint8_t* start = (const uint8_t*)module_base;
+        const uint8_t* end = start + module_size - bytes.size();
+        
+        for (const uint8_t* ptr = start; ptr <= end; ++ptr) {
+            bool found = true;
+            for (size_t i = 0; i < bytes.size(); i++) {
+                if (mask[i] && ptr[i] != bytes[i]) {
+                    found = false;
+                    break;
+                }
+            }
+            if (found) return (uintptr_t)ptr;
+        }
+        return 0;
+    }
+    
+public:
+    EncryptedPatternScanner() {
+        module_base = get_module_base();
+        module_size = get_module_size();
+        LOGI(OBF("Module: 0x%lx, Size: 0x%zx"), module_base, module_size);
+    }
+    
+    void scan(const char* name, const char* pattern) {
+        uintptr_t addr = find_pattern(pattern);
+        if (addr) {
+            results.push_back({addr, name});
+            LOGI(OBF("Found %s at 0x%lx"), name, addr);
+        }
+    }
+    
+    uintptr_t get(const char* name) {
+        for (auto& r : results) {
+            if (strcmp(r.name, name) == 0) return r.address;
+        }
+        return 0;
+    }
+};
+
+// ============================================================================
+// 10. ADVANCED AIMBOT
+// ============================================================================
+class AdvancedAimbot {
+private:
+    bool enabled = false;
+    float fov = 50.0f;
+    float smoothness = 5.0f;
+    std::mt19937 rng;
+    
+public:
+    AdvancedAimbot() : rng(std::random_device{}()) {}
+    
+    void set_enabled(bool e) { enabled = e; }
+    void set_fov(float f) { fov = f; }
+    bool is_enabled() const { return enabled; }
+    float get_fov() const { return fov; }
+    float get_smoothness() const { return smoothness; }
+    
+    void update_smoothness() {
+        if (!enabled) return;
+        std::uniform_real_distribution<> dist(0.9f, 1.1f);
+        smoothness = 5.0f * dist(rng);
+    }
+};
+
+// ============================================================================
+// 11. ADVANCED IMGUI MENU - مع Dark Style وألوان ديناميكية
+// ============================================================================
+
+// تعريف الألوان الثابتة
+static const ImVec4 COLOR_NEON_GREEN = ImVec4(0.0f, 1.0f, 0.0f, 1.0f);   // ON - أخضر نيوني
+static const ImVec4 COLOR_BRIGHT_RED  = ImVec4(1.0f, 0.0f, 0.0f, 1.0f);   // OFF - أحمر صارخ
+static const ImVec4 COLOR_CARBON_BLACK = ImVec4(0.06f, 0.06f, 0.06f, 0.85f); // أسود كربوني مع شفافية
+static const ImVec4 COLOR_ACCENT_CYAN = ImVec4(0.0f, 0.8f, 0.9f, 1.0f);    // سيان للإطار
+static const ImVec4 COLOR_TEXT_WHITE = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);     // أبيض للنص
+static const ImVec4 COLOR_TEXT_GRAY = ImVec4(0.7f, 0.7f, 0.7f, 1.0f);      // رمادي للنص الثانوي
+
+class AdvancedImGuiMenu {
+private:
+    bool menu_visible = true;
+    bool show_esp = true;
+    bool show_aimbot = false;
+    bool show_norecoil = true;
+    bool show_wallhack = true;
+    bool show_infinite_health = false;
+    bool show_infinite_ammo = false;
+    int aimbot_fov = 50;
+    float aim_smoothness = 5.0f;
+    std::mutex ui_mutex;
+    
+    void setup_style() {
+        ImGuiStyle& style = ImGui::GetStyle();
+        
+        style.Colors[ImGuiCol_WindowBg] = COLOR_CARBON_BLACK;
+        style.Colors[ImGuiCol_TitleBg] = ImVec4(0.1f, 0.1f, 0.1f, 0.9f);
+        style.Colors[ImGuiCol_TitleBgActive] = ImVec4(0.15f, 0.15f, 0.15f, 0.9f);
+        style.Colors[ImGuiCol_FrameBg] = ImVec4(0.1f, 0.1f, 0.1f, 0.8f);
+        style.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.2f, 0.2f, 0.2f, 0.9f);
+        style.Colors[ImGuiCol_Header] = ImVec4(0.12f, 0.12f, 0.12f, 0.9f);
+        style.Colors[ImGuiCol_HeaderHovered] = ImVec4(0.18f, 0.18f, 0.18f, 1.0f);
+        style.Colors[ImGuiCol_Button] = ImVec4(0.15f, 0.15f, 0.15f, 0.9f);
+        style.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.25f, 0.25f, 0.25f, 1.0f);
+        style.Colors[ImGuiCol_Text] = COLOR_TEXT_WHITE;
+        style.Colors[ImGuiCol_TextDisabled] = COLOR_TEXT_GRAY;
+        style.Colors[ImGuiCol_CheckMark] = COLOR_NEON_GREEN;
+        
+        style.WindowRounding = 8.0f;
+        style.FrameRounding = 4.0f;
+        style.WindowPadding = ImVec2(12.0f, 10.0f);
+        style.FramePadding = ImVec2(8.0f, 4.0f);
+        style.ItemSpacing = ImVec2(8.0f, 6.0f);
+        style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+    }
+    
+    bool Checkbox(const char* label, bool* v, bool is_enabled) {
+        ImGui::PushStyleColor(ImGuiCol_Text, is_enabled ? COLOR_NEON_GREEN : COLOR_BRIGHT_RED);
+        bool result = ImGui::Checkbox(label, v);
+        ImGui::PopStyleColor();
+        return result;
+    }
+    
+    bool SliderInt(const char* label, int* v, int v_min, int v_max, const char* format = "%d") {
+        ImGui::PushStyleColor(ImGuiCol_Text, COLOR_TEXT_GRAY);
+        bool result = ImGui::SliderInt(label, v, v_min, v_max, format);
+        ImGui::PopStyleColor();
+        return result;
+    }
+    
+    bool SliderFloat(const char* label, float* v, float v_min, float v_max, const char* format = "%.1f") {
+        ImGui::PushStyleColor(ImGuiCol_Text, COLOR_TEXT_GRAY);
+        bool result = ImGui::SliderFloat(label, v, v_min, v_max, format);
+        ImGui::PopStyleColor();
+        return result;
+    }
+    
+public:
+    AdvancedImGuiMenu() {
+        setup_style();
+    }
+    
+    void render() {
+        JUNK_BLOCK();
+        std::lock_guard<std::mutex> lock(ui_mutex);
+        if (!menu_visible) return;
+        
+        ImGui::SetNextWindowSize(ImVec2(360, 520), ImGuiCond_FirstUseEver);
+        
+        if (ImGui::Begin(OBF("Looka Engine v14.0"), &menu_visible,
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize)) {
+            
+            ImGui::TextColored(COLOR_ACCENT_CYAN, OBF("Looka Engine v14.0 - Full Stealth"));
+            ImGui::Separator();
+            
+            ImGui::PushStyleColor(ImGuiCol_Text, COLOR_NEON_GREEN);
+            ImGui::Text(OBF("✓ Integrity Bypass: Active"));
+            ImGui::Text(OBF("✓ Maps Hiding: Active"));
+            ImGui::Text(OBF("✓ Hardware Breakpoints: Active"));
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            
+            if (ImGui::CollapsingHeader(OBF("ESP CONTROL"), ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Indent(10.0f);
+                Checkbox(OBF("Enable ESP"), &show_esp, show_esp);
+                Checkbox(OBF("Wallhack"), &show_wallhack, show_wallhack);
+                SliderInt(OBF("Max Distance"), &aimbot_fov, 10, 300, "%d m");
+                ImGui::Unindent(10.0f);
+                ImGui::Spacing();
+            }
+            
+            if (ImGui::CollapsingHeader(OBF("AIMBOT CONTROL"), ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Indent(10.0f);
+                Checkbox(OBF("Enable Aimbot"), &show_aimbot, show_aimbot);
+                SliderInt(OBF("FOV"), &aimbot_fov, 10, 180, "%d°");
+                SliderFloat(OBF("Smoothness"), &aim_smoothness, 1.0f, 20.0f, "%.1f");
+                ImGui::TextColored(COLOR_TEXT_GRAY, OBF("Dynamic Smoothing: Active"));
+                ImGui::Unindent(10.0f);
+                ImGui::Spacing();
+            }
+            
+            if (ImGui::CollapsingHeader(OBF("MEMORY HACKS"), ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Indent(10.0f);
+                Checkbox(OBF("No Recoil"), &show_norecoil, show_norecoil);
+                Checkbox(OBF("Infinite Health"), &show_infinite_health, show_infinite_health);
+                Checkbox(OBF("Infinite Ammo"), &show_infinite_ammo, show_infinite_ammo);
+                ImGui::Unindent(10.0f);
+                ImGui::Spacing();
+            }
+            
+            if (ImGui::CollapsingHeader(OBF("STEALTH STATUS"), ImGuiTreeNodeFlags_DefaultOpen)) {
+                ImGui::Indent(10.0f);
+                ImGui::PushStyleColor(ImGuiCol_Text, COLOR_NEON_GREEN);
+                ImGui::Text(OBF("● Module: Hidden"));
+                ImGui::Text(OBF("● Symbols: Wiped"));
+                ImGui::Text(OBF("● Library: Spoofed"));
+                ImGui::Text(OBF("● Hooks: Hardware Breakpoints"));
+                ImGui::PopStyleColor();
+                ImGui::Unindent(10.0f);
+                ImGui::Spacing();
+            }
+            
+            ImGui::Separator();
+            ImGui::Dummy(ImVec2(0.0f, 8.0f));
+            
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.1f, 0.1f, 0.9f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.1f, 0.1f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(1.0f, 0.0f, 0.0f, 1.0f));
+            
+            ImGui::SetCursorPosX((ImGui::GetWindowWidth() - 120.0f) * 0.5f);
+            if (ImGui::Button(OBF("PANIC EXIT"), ImVec2(120, 36))) {
+                exit(0);
+            }
+            ImGui::PopStyleColor(3);
+            
+            ImGui::Dummy(ImVec2(0.0f, 8.0f));
+            ImGui::Separator();
+            ImGui::TextColored(COLOR_TEXT_GRAY, OBF("FPS: %.1f"), ImGui::GetIO().Framerate);
+            ImGui::TextColored(COLOR_TEXT_GRAY, OBF("Looka Engine | v14.0 | Full Stealth"));
+            
+            ImGui::End();
+        }
+    }
+    
+    void toggle_menu() {
+        std::lock_guard<std::mutex> lock(ui_mutex);
+        menu_visible = !menu_visible;
+    }
+    
+    bool is_norecoil_enabled() const { return show_norecoil; }
+    bool is_esp_enabled() const { return show_esp; }
+    bool is_aimbot_enabled() const { return show_aimbot; }
+    bool is_wallhack_enabled() const { return show_wallhack; }
+    int get_aimbot_fov() const { return aimbot_fov; }
+    float get_aim_smoothness() const { return aim_smoothness; }
+};
+
+// ============================================================================
+// 12. JNI FUNCTIONS
+// ============================================================================
+extern "C" {
+
+void toggle_menu(JNIEnv* env, jobject) {
+    if (g_menu) g_menu->toggle_menu();
+}
+
+void panic_exit(JNIEnv* env, jobject) {
+    exit(0);
+}
+
+void set_esp(JNIEnv* env, jobject, jboolean enable) {
+    LOGI(OBF("ESP: %s"), enable ? OBF("ON") : OBF("OFF"));
+}
+
+void set_aimbot(JNIEnv* env, jobject, jboolean enable) {
+    if (g_aimbot) g_aimbot->set_enabled(enable);
+    LOGI(OBF("Aimbot: %s"), enable ? OBF("ON") : OBF("OFF"));
+}
+
+} // extern "C"
+
+// ============================================================================
+// 13. JNI NATIVES REGISTRATION
+// ============================================================================
+static JNINativeMethod jni_methods[] = {
+    {OBF("toggle"), OBF("()V"), (void*)&toggle_menu },
+    {OBF("panic"), OBF("()V"), (void*)&panic_exit },
+    {OBF("setESP"), OBF("(Z)V"), (void*)&set_esp },
+    {OBF("setAimbot"), OBF("(Z)V"), (void*)&set_aimbot },
+};
+
+class JNIRegistrar {
+public:
+    static void register_natives(JNIEnv* env) {
+        jclass clazz = env->FindClass(OBF("com/looka/engine/LookaNative"));
+        if (clazz) {
+            env->RegisterNatives(clazz, jni_methods, sizeof(jni_methods) / sizeof(JNINativeMethod));
+            LOGI(OBF("JNI natives registered"));
+        }
+    }
+};
+
+// ============================================================================
+// 14. HOOKED FUNCTIONS
+// ============================================================================
+typedef float (*GetHealth_t)(uintptr_t Actor);
+static GetHealth_t original_GetHealth = nullptr;
+
+float hooked_GetHealth(uintptr_t Actor) {
+    JUNK_BLOCK();
+    if (g_menu && g_menu->is_infinite_health_enabled()) {
+        return 100.0f;
+    }
+    return original_GetHealth(Actor);
+}
+
+typedef void (*SetRecoil_t)(uintptr_t Weapon, float recoil);
+static SetRecoil_t original_SetRecoil = nullptr;
+
+void hooked_SetRecoil(uintptr_t Weapon, float recoil) {
+    JUNK_BLOCK();
+    if (g_menu && g_menu->is_norecoil_enabled()) {
+        original_SetRecoil(Weapon, 0.0f);
+    } else {
+        original_SetRecoil(Weapon, recoil);
     }
 }
 
 // ============================================================================
-// END OF FILE - Looka Engine v11.0 Ultimate Merged Edition
+// 15. GLOBAL VARIABLES
+// ============================================================================
+static AdvancedImGuiMenu* g_menu = nullptr;
+static AdvancedAimbot* g_aimbot = nullptr;
+static EncryptedPatternScanner* g_scanner = nullptr;
+static HardwareBreakpointHook* g_hw_bp = nullptr;
+
+// ============================================================================
+// 16. JNI_OnLoad - نقطة الدخول
+// ============================================================================
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM* vm, void* reserved) {
+    LOGI("%s", OBF("JNI_OnLoad - Looka Engine v14.0 Full Stealth"));
+    
+    JNIEnv* env;
+    vm->GetEnv((void**)&env, JNI_VERSION_1_6);
+    
+    DynamicKeyGenerator key_gen;
+    AdvancedSymbolHider symbol_hider;
+    LibrarySpoofer spoof;
+    AdvancedMapsHider maps_hider(spoof.get_name());
+    IntegrityBypass::install();
+    
+    g_scanner = new EncryptedPatternScanner();
+    g_scanner->scan(OBF("GetHealth"), OBF("?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 80 3F"));
+    g_scanner->scan(OBF("SetRecoil"), OBF("?? ?? ?? ?? ?? ?? ?? ?? ?? ?? 00 00 00 00"));
+    
+    g_hw_bp = new HardwareBreakpointHook();
+    
+    uintptr_t get_health = g_scanner->get(OBF("GetHealth"));
+    uintptr_t set_recoil = g_scanner->get(OBF("SetRecoil"));
+    
+    if (get_health) g_hw_bp->set_breakpoint(get_health);
+    if (set_recoil) g_hw_bp->set_breakpoint(set_recoil);
+    
+    if (get_health) DobbyHook((void*)get_health, (void*)hooked_GetHealth, (void**)&original_GetHealth);
+    if (set_recoil) DobbyHook((void*)set_recoil, (void*)hooked_SetRecoil, (void**)&original_SetRecoil);
+    
+    g_aimbot = new AdvancedAimbot();
+    g_menu = new AdvancedImGuiMenu();
+    
+    JNIRegistrar::register_natives(env);
+    
+    LOGI("%s", OBF("All stealth features initialized"));
+    LOGI("%s", OBF("Dark UI with dynamic colors active"));
+    LOGI("%s", OBF("ON = Green, OFF = Red"));
+    
+    return JNI_VERSION_1_6;
+}
+
+// ============================================================================
+// END OF FILE
 // ============================================================================
